@@ -1,0 +1,292 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro" name="ur10e_rg6">
+
+  <!-- CLI-overridable args (used by demo/launch files) -->
+  <xacro:arg name="use_fake_hardware"    default="true"/>
+  <xacro:arg name="fake_sensor_commands" default="false"/>
+  <xacro:arg name="robot_ip"             default="0.0.0.0"/>
+
+  <!-- ====================================================== -->
+  <!-- Include UR10e macros and ROS2 control                  -->
+  <!-- ====================================================== -->
+  <xacro:include filename="$(find ur_description)/urdf/ur_macro.xacro"/>
+  <xacro:include filename="$(find ur_description)/urdf/ur.ros2_control.xacro"/>
+
+  <!-- ====================================================== -->
+  <!-- World link                                             -->
+  <!-- ====================================================== -->
+  <link name="world"/>
+
+  <!-- ====================================================== -->
+  <!-- Floor collision plane                                  -->
+  <!-- Sits 10 cm below z=0 so the lowest URScript TCP target -->
+  <!-- (~-0.0015 m) and the arm links above can move freely   -->
+  <!-- without false collisions. Models a robot mounted on a  -->
+  <!-- small riser above the table surface.                   -->
+  <!-- ====================================================== -->
+  <link name="floor">
+    <visual>
+      <origin xyz="0 0 -0.105" rpy="0 0 0"/>
+      <geometry>
+        <box size="4.0 4.0 0.01"/>
+      </geometry>
+      <material name="floor_mat">
+        <color rgba="0.3 0.3 0.3 0.4"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.105" rpy="0 0 0"/>
+      <geometry>
+        <box size="4.0 4.0 0.01"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="world_to_floor" type="fixed">
+    <parent link="world"/>
+    <child link="floor"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ====================================================== -->
+  <!-- UR10e Robot                                            -->
+  <!-- ====================================================== -->
+  <xacro:ur_robot
+      name="ur10e"
+      parent="world"
+      tf_prefix=""
+      safety_limits="true"
+      safety_pos_margin="0.15"
+      safety_k_position="20"
+      kinematics_parameters_file="$(find ur_description)/config/ur10e/default_kinematics.yaml"
+      joint_limits_parameters_file="$(find ur_description)/config/ur10e/joint_limits.yaml"
+      physical_parameters_file="$(find ur_description)/config/ur10e/physical_parameters.yaml"
+      visual_parameters_file="$(find ur_description)/config/ur10e/visual_parameters.yaml"
+      transmission_hw_interface="hardware_interface/PositionJointInterface"
+      use_fake_hardware="$(arg use_fake_hardware)"
+      fake_sensor_commands="$(arg fake_sensor_commands)"
+      robot_ip="$(arg robot_ip)"
+      generate_ros2_control_tag="true">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </xacro:ur_robot>
+
+  <!-- ====================================================== -->
+  <!-- RG6 — geometry adapted from onrobot_description/urdf/  -->
+  <!-- onrobot_rg.urdf.xacro and config/rg6_v1.yaml.          -->
+  <!-- Chain: tool0 → bracket → body → finger_1 (master) and  -->
+  <!-- finger_2 (mirrored, 180° about Z, all joints mimic).   -->
+  <!-- One revolute joint `rg6_joint` drives the gripper;     -->
+  <!-- 6 mimic joints close the parallelogram linkages.        -->
+  <!-- ====================================================== -->
+
+  <!-- 1. single_bracket: mounts the gripper onto the UR flange -->
+  <link name="rg6_bracket">
+    <visual>
+      <geometry>
+        <mesh filename="package://onrobot_description/meshes/rg6_v1/visual/single_bracket.stl"/>
+      </geometry>
+      <material name="rg6_metal_mat">
+        <color rgba="0.85 0.85 0.85 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://onrobot_description/meshes/rg6_v1/visual/single_bracket.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="rg6_mount_joint" type="fixed">
+    <parent link="tool0"/>
+    <child link="rg6_bracket"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- 2. body: the main gripper housing (offset = config single_bracket entry) -->
+  <link name="rg6_body">
+    <visual>
+      <geometry>
+        <mesh filename="package://onrobot_description/meshes/rg6_v1/visual/body.stl"/>
+      </geometry>
+      <material name="rg6_body_mat">
+        <color rgba="0.92 0.92 0.92 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://onrobot_description/meshes/rg6_v1/visual/body.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="rg6_body_joint" type="fixed">
+    <parent link="rg6_bracket"/>
+    <child link="rg6_body"/>
+    <origin xyz="0 0 0.051" rpy="0 0 0"/>
+  </joint>
+
+  <!-- 3. Grasp frame (TCP) — 190 mm down the gripper Z axis -->
+  <link name="rg6_tcp">
+    <visual>
+      <geometry><sphere radius="0.002"/></geometry>
+      <material name="rg6_tcp_mat"><color rgba="0 1 0 1"/></material>
+    </visual>
+  </link>
+
+  <joint name="rg6_grasp_frame_joint" type="fixed">
+    <parent link="rg6_body"/>
+    <child link="rg6_tcp"/>
+    <origin xyz="0 0 0.19" rpy="0 0 0"/>
+  </joint>
+
+  <!-- 4. ee_link alias for MoveIt -->
+  <link name="ee_link"/>
+  <joint name="ee_fixed_joint" type="fixed">
+    <parent link="rg6_tcp"/>
+    <child link="ee_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- 5. Finger assembly macro (parallelogram linkage)        -->
+  <!-- is_master=True → drives rg6_joint; False → mirrored, all -->
+  <!-- joints mimic rg6_joint.                                  -->
+  <xacro:property name="rg6_lower" value="0.0"/>
+  <xacro:property name="rg6_upper" value="1.3"/>
+  <xacro:property name="rg6_effort" value="100.0"/>
+  <xacro:property name="rg6_velocity" value="50.0"/>
+  <xacro:property name="rg6_offset" value="-0.49"/>
+
+  <xacro:macro name="rg6_finger" params="name is_master">
+    <!-- frame-flipping placeholder so mirrored finger sits on opposite side -->
+    <link name="${name}_origin"/>
+
+    <joint name="${name}_origin_joint" type="fixed">
+      <parent link="rg6_body"/>
+      <child link="${name}_origin"/>
+      <origin xyz="0 0 0" rpy="0 0 ${0 if is_master else pi}"/>
+    </joint>
+
+    <!-- moment_arm: the upper actuated arm -->
+    <link name="${name}_moment_arm">
+      <visual>
+        <geometry>
+          <mesh filename="package://onrobot_description/meshes/rg6_v1/visual/moment_arm.stl"/>
+        </geometry>
+        <material name="rg6_metal_mat"/>
+      </visual>
+      <collision>
+        <geometry>
+          <mesh filename="package://onrobot_description/meshes/rg6_v1/collision/moment_arm.stl"/>
+        </geometry>
+      </collision>
+    </link>
+
+    <joint name="${'rg6_joint' if is_master else (name + '_mirror_joint')}" type="revolute">
+      <parent link="${name}_origin"/>
+      <child link="${name}_moment_arm"/>
+      <axis xyz="0 1 0"/>
+      <origin xyz="-0.0238 0 0.066" rpy="0 ${rg6_offset} 0"/>
+      <limit lower="${rg6_lower}" upper="${rg6_upper}" effort="${rg6_effort}" velocity="${rg6_velocity}"/>
+      <dynamics damping="0.17"/>
+      <xacro:unless value="${is_master}">
+        <mimic joint="rg6_joint" multiplier="1" offset="0"/>
+      </xacro:unless>
+    </joint>
+
+    <!-- truss_arm: parallel passive linkage bar -->
+    <link name="${name}_truss_arm">
+      <visual>
+        <geometry>
+          <mesh filename="package://onrobot_description/meshes/rg6_v1/visual/truss_arm.stl"/>
+        </geometry>
+        <material name="rg6_metal_mat"/>
+      </visual>
+      <collision>
+        <geometry>
+          <mesh filename="package://onrobot_description/meshes/rg6_v1/collision/truss_arm.stl"/>
+        </geometry>
+      </collision>
+    </link>
+
+    <joint name="${name}_truss_arm_joint" type="revolute">
+      <parent link="${name}_origin"/>
+      <child link="${name}_truss_arm"/>
+      <axis xyz="0 1 0"/>
+      <origin xyz="-0.0105 0 0.0891" rpy="0 ${rg6_offset} 0"/>
+      <limit lower="${rg6_lower}" upper="${rg6_upper}" effort="${rg6_effort}" velocity="${rg6_velocity}"/>
+      <mimic joint="rg6_joint" multiplier="1" offset="0"/>
+    </joint>
+
+    <!-- finger_tip: carries the rubber pad, attached to truss_arm -->
+    <link name="${name}_finger_tip">
+      <visual>
+        <geometry>
+          <mesh filename="package://onrobot_description/meshes/rg6_v1/visual/finger_tip.stl"/>
+        </geometry>
+        <material name="rg6_metal_mat"/>
+      </visual>
+      <collision>
+        <geometry>
+          <mesh filename="package://onrobot_description/meshes/rg6_v1/collision/finger_tip_1.stl"/>
+        </geometry>
+      </collision>
+    </link>
+
+    <joint name="${name}_finger_tip_joint" type="revolute">
+      <parent link="${name}_truss_arm"/>
+      <child link="${name}_finger_tip"/>
+      <axis xyz="0 -1 0"/>
+      <origin xyz="-0.05503 0 0.05807" rpy="0 ${-rg6_offset} 0"/>
+      <limit lower="${rg6_lower}" upper="${rg6_upper}" effort="${rg6_effort}" velocity="${rg6_velocity}"/>
+      <mimic joint="rg6_joint" multiplier="1" offset="0"/>
+    </joint>
+
+    <!-- flex_finger: rubber pad fixed to finger_tip face -->
+    <link name="${name}_flex_finger">
+      <visual>
+        <geometry>
+          <mesh filename="package://onrobot_description/meshes/rg6_v1/visual/flex_finger.stl"/>
+        </geometry>
+        <material name="rg6_rubber_mat">
+          <color rgba="0.15 0.15 0.15 1.0"/>
+        </material>
+      </visual>
+    </link>
+
+    <joint name="${name}_flex_finger_joint" type="fixed">
+      <parent link="${name}_finger_tip"/>
+      <child link="${name}_flex_finger"/>
+      <origin xyz="0.0098 0 0.0218" rpy="0 0 0"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:rg6_finger name="rg6_finger_1" is_master="true"/>
+  <xacro:rg6_finger name="rg6_finger_2" is_master="false"/>
+
+  <!-- ====================================================== -->
+  <!-- RG6 ROS2 Control                                       -->
+  <!-- Single master joint `rg6_joint`; all six mimic joints  -->
+  <!-- are derived from it inside robot_state_publisher.      -->
+  <!-- ====================================================== -->
+  <ros2_control name="OnRobotRG6System" type="system">
+    <hardware>
+      <xacro:if value="$(arg use_fake_hardware)">
+        <plugin>mock_components/GenericSystem</plugin>
+      </xacro:if>
+      <xacro:unless value="$(arg use_fake_hardware)">
+        <plugin>onrobot_interface::OnRobotHardwareInterface</plugin>
+      </xacro:unless>
+    </hardware>
+    <joint name="rg6_joint">
+      <command_interface name="position"/>
+      <state_interface name="position">
+        <!-- Boot ~70 mm open (rg6_joint=0.77 rad). Convention: rg6_joint=0
+             gives full-open ~153 mm; rg6_joint=1.25 gives ~1 mm closed.
+             Calibrated by tests/calibrate_rg6_width.py — see
+             config/rg6_width_calibration.yaml. -->
+        <param name="initial_value">0.77</param>
+      </state_interface>
+    </joint>
+  </ros2_control>
+
+</robot>

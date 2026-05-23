@@ -1,0 +1,27 @@
+# JointTrajectoryController params for the RG6 gripper (master joint only —
+# the mirror joints are URDF mimics and follow automatically).
+controller_manager:
+  ros__parameters:
+    rg6_gripper_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+rg6_gripper_controller:
+  ros__parameters:
+    joints:
+      - rg6_joint
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+    state_publish_rate: 50.0
+    action_monitor_rate: 20.0
+    # Accept goals that don't fully respecify all joints — important when
+    # MoveIt plans `arm_with_gripper` and the gripper portion is a hold.
+    allow_partial_joints_goal: true
+    allow_integration_in_goal_trajectories: true
+    constraints:
+      stopped_velocity_tolerance: 0.1
+      goal_time: 2.0
+      rg6_joint:
+        goal: 0.05
+        trajectory: 0.5

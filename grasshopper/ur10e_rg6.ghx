@@ -1,0 +1,393 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Archive name="Root">
+  <items count="1">
+    <item name="ArchiveVersion" type_name="gh_version" type_code="80">
+      <Major>0</Major><Minor>2</Minor><Revision>2</Revision>
+    </item>
+  </items>
+  <chunks count="2">
+    <chunk name="Definition">
+      <items count="1">
+        <item name="plugin_version" type_name="gh_version" type_code="80">
+          <Major>1</Major><Minor>0</Minor><Revision>0007</Revision>
+        </item>
+      </items>
+      <chunks count="3">
+        <chunk name="DocumentHeader">
+          <items count="3">
+            <item name="DocumentID" type_name="gh_guid" type_code="9">BC4A9CE2-1E49-4937-869A-2F987701FEDE</item>
+            <item name="Preview" type_name="gh_string" type_code="10">Shaded</item>
+            <item name="PreviewMeshType" type_name="gh_int32" type_code="3">1</item>
+          </items>
+        </chunk>
+        <chunk name="DefinitionProperties">
+          <items count="5">
+            <item name="Date" type_name="gh_date" type_code="8">638540000000000000</item>
+            <item name="Description" type_name="gh_string" type_code="10">UR10e + RG6 ROS 2 bridge</item>
+            <item name="KeepOpen" type_name="gh_bool" type_code="1">false</item>
+            <item name="Name" type_name="gh_string" type_code="10">ur10e_rg6</item>
+            <item name="Revision" type_name="gh_int32" type_code="3">1</item>
+          </items>
+          <chunks count="2">
+            <chunk name="Projection">
+              <items count="2">
+                <item name="Target" type_name="gh_drawing_pointf" type_code="31"><X>700</X><Y>350</Y></item>
+                <item name="Zoom" type_name="gh_single" type_code="6">1.0</item>
+              </items>
+            </chunk>
+            <chunk name="Views"><items count="1"><item name="ViewCount" type_name="gh_int32" type_code="3">0</item></items></chunk>
+          </chunks>
+        </chunk>
+        <chunk name="RcpLayout"><items count="1"><item name="RcpCount" type_name="gh_int32" type_code="3">0</item></items></chunk>
+      </chunks>
+    </chunk>
+    <chunk name="DefinitionObjects">
+      <items count="1">
+        <item name="ObjectCount" type_name="gh_int32" type_code="3">13</item>
+      </items>
+      <chunks count="13">
+        <chunk name="Object"><items count="2"><item name="GUID" type_name="gh_guid" type_code="9">410755B1-224A-4C1E-A407-BF32FB45EA7E</item><item name="Name" type_name="gh_string" type_code="10">GhPython Script</item></items><chunks count="1"><chunk name="Container"><items count="9"><item name="InstanceGuid" type_name="gh_guid" type_code="9">59E3DC43-D59C-4142-A864-67D1763F6C85</item><item name="Name" type_name="gh_string" type_code="10">GhPython Script</item><item name="NickName" type_name="gh_string" type_code="10">ur10e_rg6</item><item name="Description" type_name="gh_string" type_code="10">UR10e + RG6 ROS 2 bridge runtime</item><item name="HideInput" type_name="gh_bool" type_code="1">false</item><item name="HideOutput" type_name="gh_bool" type_code="1">false</item><item name="IsAdvancedMode" type_name="gh_bool" type_code="1">true</item><item name="IconDisplay" type_name="gh_int32" type_code="3">0</item><item name="CodeInput" type_name="gh_string" type_code="10"># ur10e_rg6_gh.py
+# Drop into a Rhino 8 GHPython component set to Python 3 (CPython) mode.
+# The script directive below auto-pip-installs roslibpy.
+#
+# Component INPUTS (right-click each input dot to rename to these):
+#   host       (str, default &quot;localhost&quot;)
+#   port       (int, default 9090)
+#   connect    (bool toggle)        master on/off for the WebSocket
+#   mode       (str)                &quot;direct&quot; or &quot;moveit&quot;  -- chooses goal sink
+#   target     (list[float] len 6)  desired UR joint goal in radians
+#   duration   (float)              seconds for the trajectory (direct mode)
+#   vel_scale  (float, 0..1)        MoveIt velocity scaling factor
+#   move       (bool button)        fires once: sends the goal
+#   gripper    (bool toggle)        True = close RG6, False = open
+#   trigger_gr (bool button)        fires once: sends the gripper command
+#   tick       (anything timed)     wire a Timer to this to keep IO flowing
+#
+# Component OUTPUTS:
+#   ok         (bool)               WS connected?
+#   names      (list[str])          live joint names from /joint_states
+#   positions  (list[float])        live joint positions
+#   tcp_pos    (Point3d)            live world-frame RG6 TCP position
+#   tcp_quat   (list[float])        live world-frame RG6 TCP quaternion (x,y,z,w)
+#   log        (str)                last status message
+
+# r: roslibpy
+
+import math
+import time
+import roslibpy
+import roslibpy.actionlib as actionlib
+import Rhino.Geometry as rg
+
+# ------------------------------------------------------------------
+# Per-component cache (persisted between solutions on this instance)
+# ------------------------------------------------------------------
+S = ghenv.Component
+if not hasattr(S, &quot;_rg6_state&quot;):
+    S._rg6_state = {
+        &quot;ros&quot;: None,
+        &quot;joint_msg&quot;: {&quot;name&quot;: [], &quot;position&quot;: []},
+        &quot;tf_world_tcp&quot;: None,
+        &quot;log&quot;: &quot;&quot;,
+        &quot;move_armed&quot;: False,
+        &quot;grip_armed&quot;: False,
+    }
+state = S._rg6_state
+
+UR_JOINTS = [
+    &quot;shoulder_pan_joint&quot;, &quot;shoulder_lift_joint&quot;, &quot;elbow_joint&quot;,
+    &quot;wrist_1_joint&quot;, &quot;wrist_2_joint&quot;, &quot;wrist_3_joint&quot;,
+]
+RG6_TIP_FRAME = &quot;rg6_tcp&quot;
+BASE_FRAME = &quot;world&quot;
+
+# MoveIt 2 endpoints used in &quot;moveit&quot; mode (must match ur10e_rg6_moveit_config)
+MOVEIT_GROUP = &quot;ur_manipulator&quot;
+MOVEIT_ACTION = &quot;/move_action&quot;
+MOVEIT_ACTION_TYPE = &quot;moveit_msgs/action/MoveGroup&quot;
+
+# RG6 gripper: single master joint rg6_joint, range 0 (closed) → 1.3 (full open).
+# Default to ~10 mm gap (0.08 rad) — safe boot position the URDF uses too.
+# The gripper controller is a JointTrajectoryController; commands are sent as
+# trajectory_msgs/JointTrajectory on /rg6_gripper_controller/joint_trajectory.
+RG6_JOINT = &quot;rg6_joint&quot;
+RG6_TRAJ_TOPIC = &quot;/rg6_gripper_controller/joint_trajectory&quot;
+RG6_OPEN_RAD = 1.3
+RG6_SAFE_RAD = 0.08
+RG6_CLOSED_RAD = 0.0
+RG6_MOVE_TIME = 1.5    # seconds per gripper command — safe default
+
+
+def _log(msg):
+    state[&quot;log&quot;] = str(msg)
+
+
+# ------------------------------------------------------------------
+# Connect / disconnect
+# ------------------------------------------------------------------
+ros = state[&quot;ros&quot;]
+
+if connect:
+    if ros is None or not ros.is_connected:
+        try:
+            ros = roslibpy.Ros(host=host or &quot;localhost&quot;, port=int(port or 9090))
+            ros.run()
+            state[&quot;ros&quot;] = ros
+            _log(&quot;connected&quot;)
+
+            # /joint_states subscriber (sensor_msgs/msg/JointState)
+            js_topic = roslibpy.Topic(ros, &quot;/joint_states&quot;, &quot;sensor_msgs/msg/JointState&quot;)
+            js_topic.subscribe(lambda m: state.__setitem__(&quot;joint_msg&quot;, m))
+
+            # /tf subscriber — accumulate transforms keyed by (parent, child)
+            state.setdefault(&quot;tf_table&quot;, {})
+
+            def _on_tf(msg):
+                for tr in msg.get(&quot;transforms&quot;, []):
+                    key = (tr[&quot;header&quot;][&quot;frame_id&quot;], tr[&quot;child_frame_id&quot;])
+                    state[&quot;tf_table&quot;][key] = tr
+
+            tf_topic = roslibpy.Topic(ros, &quot;/tf&quot;, &quot;tf2_msgs/msg/TFMessage&quot;)
+            tf_topic.subscribe(_on_tf)
+            tf_static = roslibpy.Topic(ros, &quot;/tf_static&quot;, &quot;tf2_msgs/msg/TFMessage&quot;)
+            tf_static.subscribe(_on_tf)
+        except Exception as e:
+            _log(&quot;connect failed: %s&quot; % e)
+            state[&quot;ros&quot;] = None
+            ros = None
+else:
+    if ros is not None:
+        try:
+            ros.terminate()
+        except Exception:
+            pass
+        state[&quot;ros&quot;] = None
+        ros = None
+        _log(&quot;disconnected&quot;)
+
+ok = bool(ros and ros.is_connected)
+
+# ------------------------------------------------------------------
+# Live joint state output
+# ------------------------------------------------------------------
+jm = state[&quot;joint_msg&quot;]
+names = list(jm.get(&quot;name&quot;, []))
+positions = list(jm.get(&quot;position&quot;, []))
+
+# ------------------------------------------------------------------
+# Live RG6 TCP from /tf (chase the chain world -&gt; rg6_tcp)
+# ------------------------------------------------------------------
+tcp_pos = None
+tcp_quat = []
+tf_table = state.get(&quot;tf_table&quot;, {})
+
+
+def _resolve_pose(target_frame, source_frame=BASE_FRAME, depth=12):
+    &quot;&quot;&quot;Compose transforms along the parent chain. Returns (xyz, quat) or None.&quot;&quot;&quot;
+    # Walk from target_frame back toward source_frame.
+    chain = []
+    cur = target_frame
+    for _ in range(depth):
+        parent = None
+        for (p, c), tr in tf_table.items():
+            if c == cur:
+                parent = p
+                chain.append(tr)
+                break
+        if parent is None:
+            break
+        if parent == source_frame:
+            chain.append(None)  # sentinel
+            break
+        cur = parent
+    if not chain or chain[-1] is not None:
+        return None
+    chain = chain[:-1]  # drop sentinel
+
+    # Compose: chain[0] is leaf, chain[-1] is closest to source.
+    px, py, pz = 0.0, 0.0, 0.0
+    qx, qy, qz, qw = 0.0, 0.0, 0.0, 1.0
+    for tr in reversed(chain):
+        t = tr[&quot;transform&quot;][&quot;translation&quot;]
+        r = tr[&quot;transform&quot;][&quot;rotation&quot;]
+        # quat-rotate (t.x,t.y,t.z) by (qx,qy,qz,qw) and add to (px,py,pz)
+        tx, ty, tz = t[&quot;x&quot;], t[&quot;y&quot;], t[&quot;z&quot;]
+        # rotate vec by current quat
+        rx = (1 - 2 * qy * qy - 2 * qz * qz) * tx + (2 * qx * qy - 2 * qz * qw) * ty + (2 * qx * qz + 2 * qy * qw) * tz
+        ry = (2 * qx * qy + 2 * qz * qw) * tx + (1 - 2 * qx * qx - 2 * qz * qz) * ty + (2 * qy * qz - 2 * qx * qw) * tz
+        rz = (2 * qx * qz - 2 * qy * qw) * tx + (2 * qy * qz + 2 * qx * qw) * ty + (1 - 2 * qx * qx - 2 * qy * qy) * tz
+        px += rx; py += ry; pz += rz
+        # multiply quats: q = q * r
+        nx = qw * r[&quot;x&quot;] + qx * r[&quot;w&quot;] + qy * r[&quot;z&quot;] - qz * r[&quot;y&quot;]
+        ny = qw * r[&quot;y&quot;] - qx * r[&quot;z&quot;] + qy * r[&quot;w&quot;] + qz * r[&quot;x&quot;]
+        nz = qw * r[&quot;z&quot;] + qx * r[&quot;y&quot;] - qy * r[&quot;x&quot;] + qz * r[&quot;w&quot;]
+        nw = qw * r[&quot;w&quot;] - qx * r[&quot;x&quot;] - qy * r[&quot;y&quot;] - qz * r[&quot;z&quot;]
+        qx, qy, qz, qw = nx, ny, nz, nw
+    return (px, py, pz), (qx, qy, qz, qw)
+
+
+pose = _resolve_pose(RG6_TIP_FRAME)
+if pose is not None:
+    (px, py, pz), q = pose
+    tcp_pos = rg.Point3d(px * 1000.0, py * 1000.0, pz * 1000.0)  # m -&gt; mm for Rhino default
+    tcp_quat = list(q)
+
+# ------------------------------------------------------------------
+# Move arm — edge-trigger on `move`
+# Two modes:
+#   &quot;direct&quot;  → raw FollowJointTrajectory action on the UR controller.
+#               Fast and predictable, but does NO collision checking.
+#   &quot;moveit&quot;  → MoveIt 2 /move_action: plans a collision-free path, then
+#               executes through the same controller. Requires the MoveIt
+#               demo or move_group launch to be running.
+# ------------------------------------------------------------------
+_mode = (mode or &quot;direct&quot;).strip().lower()
+
+def _send_direct(t, dur):
+    dur_sec = int(dur)
+    dur_nsec = int((dur - dur_sec) * 1e9)
+    client = actionlib.ActionClient(
+        ros,
+        &quot;/scaled_joint_trajectory_controller/follow_joint_trajectory&quot;,
+        &quot;control_msgs/action/FollowJointTrajectory&quot;,
+    )
+    goal = actionlib.Goal(client, roslibpy.Message({
+        &quot;trajectory&quot;: {
+            &quot;joint_names&quot;: UR_JOINTS,
+            &quot;points&quot;: [{
+                &quot;positions&quot;: t,
+                &quot;velocities&quot;: [0.0] * 6,
+                &quot;time_from_start&quot;: {&quot;sec&quot;: dur_sec, &quot;nanosec&quot;: dur_nsec},
+            }],
+        }
+    }))
+    goal.on(&quot;result&quot;, lambda r: _log(&quot;direct: done&quot;))
+    goal.send()
+    return goal
+
+
+def _send_moveit(t, vscale):
+    &quot;&quot;&quot;Build a MoveGroup goal with joint constraints; plan + execute.&quot;&quot;&quot;
+    joint_constraints = [{
+        &quot;joint_name&quot;: jname,
+        &quot;position&quot;: float(jpos),
+        &quot;tolerance_above&quot;: 0.01,
+        &quot;tolerance_below&quot;: 0.01,
+        &quot;weight&quot;: 1.0,
+    } for jname, jpos in zip(UR_JOINTS, t)]
+
+    motion_plan_request = {
+        &quot;workspace_parameters&quot;: {
+            &quot;header&quot;: {&quot;frame_id&quot;: BASE_FRAME, &quot;stamp&quot;: {&quot;sec&quot;: 0, &quot;nanosec&quot;: 0}},
+            &quot;min_corner&quot;: {&quot;x&quot;: -2.0, &quot;y&quot;: -2.0, &quot;z&quot;: -2.0},
+            &quot;max_corner&quot;: {&quot;x&quot;:  2.0, &quot;y&quot;:  2.0, &quot;z&quot;:  2.0},
+        },
+        &quot;start_state&quot;: {&quot;is_diff&quot;: True},  # use current state
+        &quot;goal_constraints&quot;: [{
+            &quot;name&quot;: &quot;gh_goal&quot;,
+            &quot;joint_constraints&quot;: joint_constraints,
+            &quot;position_constraints&quot;: [],
+            &quot;orientation_constraints&quot;: [],
+            &quot;visibility_constraints&quot;: [],
+        }],
+        &quot;path_constraints&quot;: {&quot;name&quot;: &quot;&quot;, &quot;joint_constraints&quot;: [],
+                             &quot;position_constraints&quot;: [], &quot;orientation_constraints&quot;: [],
+                             &quot;visibility_constraints&quot;: []},
+        &quot;trajectory_constraints&quot;: {&quot;constraints&quot;: []},
+        &quot;reference_trajectories&quot;: [],
+        &quot;pipeline_id&quot;: &quot;ompl&quot;,
+        &quot;planner_id&quot;: &quot;RRTConnectkConfigDefault&quot;,
+        &quot;group_name&quot;: MOVEIT_GROUP,
+        &quot;num_planning_attempts&quot;: 10,
+        &quot;allowed_planning_time&quot;: 5.0,
+        &quot;max_velocity_scaling_factor&quot;: float(vscale),
+        &quot;max_acceleration_scaling_factor&quot;: float(vscale),
+        &quot;cartesian_speed_limited_link&quot;: &quot;&quot;,
+        &quot;max_cartesian_speed&quot;: 0.0,
+    }
+    planning_options = {
+        &quot;planning_scene_diff&quot;: {&quot;is_diff&quot;: True, &quot;robot_state&quot;: {&quot;is_diff&quot;: True}},
+        &quot;plan_only&quot;: False,
+        &quot;look_around&quot;: False,
+        &quot;look_around_attempts&quot;: 0,
+        &quot;max_safe_execution_cost&quot;: 0.0,
+        &quot;replan&quot;: False,
+        &quot;replan_attempts&quot;: 0,
+        &quot;replan_delay&quot;: 0.0,
+    }
+
+    client = actionlib.ActionClient(ros, MOVEIT_ACTION, MOVEIT_ACTION_TYPE)
+    goal = actionlib.Goal(client, roslibpy.Message({
+        &quot;request&quot;: motion_plan_request,
+        &quot;planning_options&quot;: planning_options,
+    }))
+
+    def _on_result(res):
+        code = res.get(&quot;error_code&quot;, {}).get(&quot;val&quot;, 0)
+        _log(&quot;moveit: done (error_code=%s)&quot; % code)
+
+    goal.on(&quot;result&quot;, _on_result)
+    goal.send()
+    return goal
+
+
+if ok and move and not state[&quot;move_armed&quot;]:
+    state[&quot;move_armed&quot;] = True
+    try:
+        if not target or len(list(target)) != 6:
+            _log(&quot;move: target must be 6 floats (radians)&quot;)
+        else:
+            t = [float(x) for x in target]
+            if _mode == &quot;moveit&quot;:
+                vs = float(vel_scale) if vel_scale is not None else 0.2
+                vs = max(0.01, min(1.0, vs))
+                _send_moveit(t, vs)
+                _log(&quot;moveit: sent group=%s vscale=%.2f&quot; % (MOVEIT_GROUP, vs))
+            else:
+                dur = max(0.5, float(duration or 4.0))
+                _send_direct(t, dur)
+                _log(&quot;direct: sent %s rad over %.1fs&quot; % (t, dur))
+    except Exception as e:
+        _log(&quot;move error: %s&quot; % e)
+elif not move:
+    state[&quot;move_armed&quot;] = False
+
+# ------------------------------------------------------------------
+# Gripper — edge-trigger on `trigger_gr`
+# Drives the rg6_gripper_controller via Float64MultiArray.
+# gripper=True  -&gt; close (0.0 rad)
+# gripper=False -&gt; open  (1.3 rad)
+# A repeat-publish keeps the controller&#x27;s last command latched.
+# ------------------------------------------------------------------
+if ok and trigger_gr and not state[&quot;grip_armed&quot;]:
+    state[&quot;grip_armed&quot;] = True
+    try:
+        topic = roslibpy.Topic(ros, RG6_TRAJ_TOPIC,
+                               &quot;trajectory_msgs/msg/JointTrajectory&quot;)
+        topic.advertise()
+        target = RG6_CLOSED_RAD if gripper else RG6_OPEN_RAD
+        sec = int(RG6_MOVE_TIME)
+        nsec = int((RG6_MOVE_TIME - sec) * 1e9)
+        msg = roslibpy.Message({
+            &quot;joint_names&quot;: [RG6_JOINT],
+            &quot;points&quot;: [{
+                &quot;positions&quot;: [float(target)],
+                &quot;velocities&quot;: [0.0],
+                &quot;time_from_start&quot;: {&quot;sec&quot;: sec, &quot;nanosec&quot;: nsec},
+            }],
+        })
+        topic.publish(msg)
+        topic.unadvertise()
+        _log(&quot;rg6: %s (%.2f rad over %.1fs)&quot; %
+             (&quot;close&quot; if gripper else &quot;open&quot;, target, RG6_MOVE_TIME))
+    except Exception as e:
+        _log(&quot;rg6 call error: %s&quot; % e)
+elif not trigger_gr:
+    state[&quot;grip_armed&quot;] = False
+
+log = state[&quot;log&quot;]
+</item></items><chunks count="18"><chunk name="Attributes"><items count="2"><item name="Pivot" type_name="gh_drawing_pointf" type_code="31"><X>600</X><Y>320</Y></item><item name="Bounds" type_name="gh_drawing_rectanglef" type_code="35"><X>540</X><Y>240</Y><W>120</W><H>160</H></item></items></chunk><chunk name="param_input"><items count="10"><item name="InstanceGuid" type_name="gh_guid" type_code="9">AF325C9A-9B56-4527-9D13-735057432EAF</item><item name="Name" type_name="gh_string" type_code="10">host</item><item name="NickName" type_name="gh_string" type_code="10">host</item><item name="Description" type_name="gh_string" type_code="10"></item><item name="Optional" type_name="gh_bool" type_code="1">true</item><item name="Reverse" type_name="gh_bool" type_code="1">false</item><item name="Simplify" type_name="gh_bool" type_code="1">false</item><item name="Access" type_name="gh_int32" type_code="3">0</item><item name="SourceCount" type_name="gh_int32" type_code="3">0</item><item name="TypeHintID" type_name="gh_int32" type_code="3">0</item></items></chunk><chunk name="param_input"><items count="10"><item name="InstanceGuid" type_name="gh_guid" type_code="9">02CB7D26-52D8-4C70-9AAD-C6D651E90D6B</item><item name="Name" type_name="gh_string" type_code="10">port</item><item name="NickName" type_name="gh_string" type_code="10">port</item><item name="Description" type_name="gh_string" type_code="10"></item><item name="Optional" type_name="gh_bool" type_code="1">true</item><item name="Reverse" type_name="gh_bool" type_code="1">false</item><item name="Simplify" type_name="gh_bool" type_code="1">false</item><item name="Access" type_name="gh_int32" type_code="3">0</item><item name="SourceCount" type_name="gh_int32" type_code="3">0</item><item name="TypeHintID" type_name="gh_int32" type_code="3">0</item></items></chunk><chunk name="param_input"><items count="10"><item name="InstanceGuid" type_name="gh_guid" type_code="9">026F05EC-B37A-46D8-B65C-312FEFE90122</item><item name="Name" type_name="gh_string" type_code="10">connect</item><item name="NickName" type_name="gh_string" type_code="10">connect</item><item name="Description" type_name="gh_string" type_code="10"></item><item name="Optional" type_name="gh_bool" type_code="1">true</item><item name="Reverse" type_name="gh_bool" type_code="1">false</item><item name="Simplify" type_name="gh_bool" type_code="1">false</item><item name="Access" type_name="gh_int32" type_code="3">0</item><item name="SourceCount" type_name="gh_int32" type_code="3">0</item><item name="TypeHintID" type_name="gh_int32" type_code="3">0</item></items></chunk><chunk name="param_input"><items count="10"><item name="InstanceGuid" type_name="gh_guid" type_code="9">36416CBB-030F-4396-BDA3-64810C42287D</item><item name="Name" type_name="gh_string" type_code="10">mode</item><item name="NickName" type_name="gh_string" type_code="10">mode</item><item name="Description" type_name="gh_string" type_code="10"></item><item name="Optional" type_name="gh_bool" type_code="1">true</item><item name="Reverse" type_name="gh_bool" type_code="1">false</item><item name="Simplify" type_name="gh_bool" type_code="1">false</item><item name="Access" type_name="gh_int32" type_code="3">0</item><item name="SourceCount" type_name="gh_int32" type_code="3">0</item><item name="TypeHintID" type_name="gh_int32" type_code="3">0</item></items></chunk><chunk name="param_input"><items count="10"><item name="InstanceGuid" type_name="gh_guid" type_code="9">092A13A8-FA89-43FA-B591-898D9070ECCE</item><item name="Name" type_name="gh_string" type_code="10">target</item><item name="NickName" type_name="gh_string" type_code="10">target</item><item name="Description" type_name="gh_string" type_code="10"></item><item name="Optional" type_name="gh_bool" type_code="1">true</item><item name="Reverse" type_name="gh_bool" type_code="1">false</item><item name="Simplify" type_name="gh_bool" type_code="1">false</item><item name="Access" type_name="gh_int32" type_code="3">1</item><item name="SourceCount" type_name="gh_int32" type_code="3">0</item><item name="TypeHintID" type_name="gh_int32" type_code="3">0</item></items></chunk><chunk name="param_input"><items count="10"><item name="InstanceGuid" type_name="gh_guid" type_code="9">436B9383-83ED-432E-8FDA-E4D4D1998678</item><item name="Name" type_name="gh_string" type_code="10">duration</item><item name="NickName" type_name="gh_string" type_code="10">duration</item><item name="Description" type_name="gh_string" type_code="10"></item><item name="Optional" type_name="gh_bool" type_code="1">true</item><item name="Reverse" type_name="gh_bool" type_code="1">false</item><item name="Simplify" type_name="gh_bool" type_code="1">false</item><item name="Access" type_name="gh_int32" type_code="3">0</item><item name="SourceCount" type_name="gh_int32" type_code="3">0</item><item name="TypeHintID" type_name="gh_int32" type_code="3">0</item></items></chunk><chunk name="param_input"><items count="10"><item name="InstanceGuid" type_name="gh_guid" type_code="9">C2E9B1FE-EB1E-4244-A485-9C5D28CFCED9</item><item name="Name" type_name="gh_string" type_code="10">vel_scale</item><item name="NickName" type_name="gh_string" type_code="10">vel_scale</item><item name="Description" type_name="gh_string" type_code="10"></item><item name="Optional" type_name="gh_bool" type_code="1">true</item><item name="Reverse" type_name="gh_bool" type_code="1">false</item><item name="Simplify" type_name="gh_bool" type_code="1">false</item><item name="Access" type_name="gh_int32" type_code="3">0</item><item name="SourceCount" type_name="gh_int32" type_code="3">0</item><item name="TypeHintID" type_name="gh_int32" type_code="3">0</item></items></chunk><chunk name="param_input"><items count="10"><item name="InstanceGuid" type_name="gh_guid" type_code="9">546E36F7-6D17-45C5-8AC5-7246950A5B1B</item><item name="Name" type_name="gh_string" type_code="10">move</item><item name="NickName" type_name="gh_string" type_code="10">move</item><item name="Description" type_name="gh_string" type_code="10"></item><item name="Optional" type_name="gh_bool" type_code="1">true</item><item name="Reverse" type_name="gh_bool" type_code="1">false</item><item name="Simplify" type_name="gh_bool" type_code="1">false</item><item name="Access" type_name="gh_int32" type_code="3">0</item><item name="SourceCount" type_name="gh_int32" type_code="3">0</item><item name="TypeHintID" type_name="gh_int32" type_code="3">0</item></items></chunk><chunk name="param_input"><items count="10"><item name="InstanceGuid" type_name="gh_guid" type_code="9">2B7E1190-3307-4E74-8B99-EC937AEFF9D8</item><item name="Name" type_name="gh_string" type_code="10">gripper</item><item name="NickName" type_name="gh_string" type_code="10">gripper</item><item name="Description" type_name="gh_string" type_code="10"></item><item name="Optional" type_name="gh_bool" type_code="1">true</item><item name="Reverse" type_name="gh_bool" type_code="1">false</item><item name="Simplify" type_name="gh_bool" type_code="1">false</item><item name="Access" type_name="gh_int32" type_code="3">0</item><item name="SourceCount" type_name="gh_int32" type_code="3">0</item><item name="TypeHintID" type_name="gh_int32" type_code="3">0</item></items></chunk><chunk name="param_input"><items count="10"><item name="InstanceGuid" type_name="gh_guid" type_code="9">334122AD-CB21-4C3F-B6C1-619AB4113F7A</item><item name="Name" type_name="gh_string" type_code="10">trigger_gr</item><item name="NickName" type_name="gh_string" type_code="10">trigger_gr</item><item name="Description" type_name="gh_string" type_code="10"></item><item name="Optional" type_name="gh_bool" type_code="1">true</item><item name="Reverse" type_name="gh_bool" type_code="1">false</item><item name="Simplify" type_name="gh_bool" type_code="1">false</item><item name="Access" type_name="gh_int32" type_code="3">0</item><item name="SourceCount" type_name="gh_int32" type_code="3">0</item><item name="TypeHintID" type_name="gh_int32" type_code="3">0</item></items></chunk><chunk name="param_input"><items count="10"><item name="InstanceGuid" type_name="gh_guid" type_code="9">7BA93753-9B7D-436F-ACB2-28DF5BF6C3A3</item><item name="Name" type_name="gh_string" type_code="10">tick</item><item name="NickName" type_name="gh_string" type_code="10">tick</item><item name="Description" type_name="gh_string" type_code="10"></item><item name="Optional" type_name="gh_bool" type_code="1">true</item><item name="Reverse" type_name="gh_bool" type_code="1">false</item><item name="Simplify" type_name="gh_bool" type_code="1">false</item><item name="Access" type_name="gh_int32" type_code="3">0</item><item name="SourceCount" type_name="gh_int32" type_code="3">0</item><item name="TypeHintID" type_name="gh_int32" type_code="3">0</item></items></chunk><chunk name="param_output"><items count="5"><item name="InstanceGuid" type_name="gh_guid" type_code="9">F5D3A36F-8C4E-4C03-BD83-B2C6EBBB1875</item><item name="Name" type_name="gh_string" type_code="10">ok</item><item name="NickName" type_name="gh_string" type_code="10">ok</item><item name="Description" type_name="gh_string" type_code="10"></item><item name="Optional" type_name="gh_bool" type_code="1">true</item></items></chunk><chunk name="param_output"><items count="5"><item name="InstanceGuid" type_name="gh_guid" type_code="9">A2B74013-14F0-4AD1-AFA8-80B067B5F5A2</item><item name="Name" type_name="gh_string" type_code="10">names</item><item name="NickName" type_name="gh_string" type_code="10">names</item><item name="Description" type_name="gh_string" type_code="10"></item><item name="Optional" type_name="gh_bool" type_code="1">true</item></items></chunk><chunk name="param_output"><items count="5"><item name="InstanceGuid" type_name="gh_guid" type_code="9">B76BABA8-7EEC-4995-83D0-3F1AC0F941E0</item><item name="Name" type_name="gh_string" type_code="10">positions</item><item name="NickName" type_name="gh_string" type_code="10">positions</item><item name="Description" type_name="gh_string" type_code="10"></item><item name="Optional" type_name="gh_bool" type_code="1">true</item></items></chunk><chunk name="param_output"><items count="5"><item name="InstanceGuid" type_name="gh_guid" type_code="9">4C419E6F-3A11-4C0B-BC0D-CD87C222043C</item><item name="Name" type_name="gh_string" type_code="10">tcp_pos</item><item name="NickName" type_name="gh_string" type_code="10">tcp_pos</item><item name="Description" type_name="gh_string" type_code="10"></item><item name="Optional" type_name="gh_bool" type_code="1">true</item></items></chunk><chunk name="param_output"><items count="5"><item name="InstanceGuid" type_name="gh_guid" type_code="9">B2B1A2D8-89F1-4E47-AEA6-AC3B84C20A57</item><item name="Name" type_name="gh_string" type_code="10">tcp_quat</item><item name="NickName" type_name="gh_string" type_code="10">tcp_quat</item><item name="Description" type_name="gh_string" type_code="10"></item><item name="Optional" type_name="gh_bool" type_code="1">true</item></items></chunk><chunk name="param_output"><items count="5"><item name="InstanceGuid" type_name="gh_guid" type_code="9">A9E1517E-A985-4374-9B70-CB2C27C624DA</item><item name="Name" type_name="gh_string" type_code="10">log</item><item name="NickName" type_name="gh_string" type_code="10">log</item><item name="Description" type_name="gh_string" type_code="10"></item><item name="Optional" type_name="gh_bool" type_code="1">true</item></items></chunk></chunks></chunk></chunks></chunk><chunk name="Object"><items count="2"><item name="GUID" type_name="gh_guid" type_code="9">59E0B89A-E487-49F8-BAB8-B5BAB16BE14C</item><item name="Name" type_name="gh_string" type_code="10">Panel</item></items><chunks count="1"><chunk name="Container"><items count="9"><item name="InstanceGuid" type_name="gh_guid" type_code="9">293583CF-1DC2-493F-84D1-D2F9823855A3</item><item name="Name" type_name="gh_string" type_code="10">Panel</item><item name="NickName" type_name="gh_string" type_code="10">localhost</item><item name="UserText" type_name="gh_string" type_code="10">localhost</item><item name="MultiLine" type_name="gh_bool" type_code="1">true</item><item name="DrawIndices" type_name="gh_bool" type_code="1">false</item><item name="DrawPaths" type_name="gh_bool" type_code="1">false</item><item name="Stream" type_name="gh_bool" type_code="1">false</item><item name="Wrap" type_name="gh_bool" type_code="1">true</item></items><chunks count="1"><chunk name="Attributes"><items count="2"><item name="Pivot" type_name="gh_drawing_pointf" type_code="31"><X>420.0</X><Y>171.0</Y></item><item name="Bounds" type_name="gh_drawing_rectanglef" type_code="35"><X>340</X><Y>160</Y><W>160</W><H>22</H></item></items></chunk></chunks></chunk></chunks></chunk><chunk name="Object"><items count="2"><item name="GUID" type_name="gh_guid" type_code="9">59E0B89A-E487-49F8-BAB8-B5BAB16BE14C</item><item name="Name" type_name="gh_string" type_code="10">Panel</item></items><chunks count="1"><chunk name="Container"><items count="9"><item name="InstanceGuid" type_name="gh_guid" type_code="9">27E42B73-F735-46AA-A84C-B27952DC7DAB</item><item name="Name" type_name="gh_string" type_code="10">Panel</item><item name="NickName" type_name="gh_string" type_code="10">9090</item><item name="UserText" type_name="gh_string" type_code="10">9090</item><item name="MultiLine" type_name="gh_bool" type_code="1">true</item><item name="DrawIndices" type_name="gh_bool" type_code="1">false</item><item name="DrawPaths" type_name="gh_bool" type_code="1">false</item><item name="Stream" type_name="gh_bool" type_code="1">false</item><item name="Wrap" type_name="gh_bool" type_code="1">true</item></items><chunks count="1"><chunk name="Attributes"><items count="2"><item name="Pivot" type_name="gh_drawing_pointf" type_code="31"><X>420.0</X><Y>196.0</Y></item><item name="Bounds" type_name="gh_drawing_rectanglef" type_code="35"><X>340</X><Y>185</Y><W>160</W><H>22</H></item></items></chunk></chunks></chunk></chunks></chunk><chunk name="Object"><items count="2"><item name="GUID" type_name="gh_guid" type_code="9">2E78987B-9DCB-42EA-A7A6-2B68BA0E8B79</item><item name="Name" type_name="gh_string" type_code="10">Boolean Toggle</item></items><chunks count="1"><chunk name="Container"><items count="6"><item name="InstanceGuid" type_name="gh_guid" type_code="9">26D93918-CE6E-4DAF-9CB5-40DFE9A14124</item><item name="Name" type_name="gh_string" type_code="10">Boolean Toggle</item><item name="NickName" type_name="gh_string" type_code="10">connect</item><item name="Description" type_name="gh_string" type_code="10">connect</item><item name="Optional" type_name="gh_bool" type_code="1">false</item><item name="Value" type_name="gh_bool" type_code="1">false</item></items><chunks count="1"><chunk name="Attributes"><items count="2"><item name="Pivot" type_name="gh_drawing_pointf" type_code="31"><X>385</X><Y>221</Y></item><item name="Bounds" type_name="gh_drawing_rectanglef" type_code="35"><X>350</X><Y>210</Y><W>70</W><H>22</H></item></items></chunk></chunks></chunk></chunks></chunk><chunk name="Object"><items count="2"><item name="GUID" type_name="gh_guid" type_code="9">59E0B89A-E487-49F8-BAB8-B5BAB16BE14C</item><item name="Name" type_name="gh_string" type_code="10">Panel</item></items><chunks count="1"><chunk name="Container"><items count="9"><item name="InstanceGuid" type_name="gh_guid" type_code="9">A324C252-E8A4-4575-9AE0-40E3B7536330</item><item name="Name" type_name="gh_string" type_code="10">Panel</item><item name="NickName" type_name="gh_string" type_code="10">direct</item><item name="UserText" type_name="gh_string" type_code="10">direct</item><item name="MultiLine" type_name="gh_bool" type_code="1">true</item><item name="DrawIndices" type_name="gh_bool" type_code="1">false</item><item name="DrawPaths" type_name="gh_bool" type_code="1">false</item><item name="Stream" type_name="gh_bool" type_code="1">false</item><item name="Wrap" type_name="gh_bool" type_code="1">true</item></items><chunks count="1"><chunk name="Attributes"><items count="2"><item name="Pivot" type_name="gh_drawing_pointf" type_code="31"><X>420.0</X><Y>246.0</Y></item><item name="Bounds" type_name="gh_drawing_rectanglef" type_code="35"><X>340</X><Y>235</Y><W>160</W><H>22</H></item></items></chunk></chunks></chunk></chunks></chunk><chunk name="Object"><items count="2"><item name="GUID" type_name="gh_guid" type_code="9">59E0B89A-E487-49F8-BAB8-B5BAB16BE14C</item><item name="Name" type_name="gh_string" type_code="10">Panel</item></items><chunks count="1"><chunk name="Container"><items count="9"><item name="InstanceGuid" type_name="gh_guid" type_code="9">55EB0A76-260A-4059-A27A-FABBFFAA487F</item><item name="Name" type_name="gh_string" type_code="10">Panel</item><item name="NickName" type_name="gh_string" type_code="10">0, -1.57, 1.57, -1.5</item><item name="UserText" type_name="gh_string" type_code="10">0, -1.57, 1.57, -1.57, -1.57, 0</item><item name="MultiLine" type_name="gh_bool" type_code="1">true</item><item name="DrawIndices" type_name="gh_bool" type_code="1">false</item><item name="DrawPaths" type_name="gh_bool" type_code="1">false</item><item name="Stream" type_name="gh_bool" type_code="1">false</item><item name="Wrap" type_name="gh_bool" type_code="1">true</item></items><chunks count="1"><chunk name="Attributes"><items count="2"><item name="Pivot" type_name="gh_drawing_pointf" type_code="31"><X>415.0</X><Y>271.0</Y></item><item name="Bounds" type_name="gh_drawing_rectanglef" type_code="35"><X>320</X><Y>260</Y><W>190</W><H>22</H></item></items></chunk></chunks></chunk></chunks></chunk><chunk name="Object"><items count="2"><item name="GUID" type_name="gh_guid" type_code="9">59E0B89A-E487-49F8-BAB8-B5BAB16BE14C</item><item name="Name" type_name="gh_string" type_code="10">Panel</item></items><chunks count="1"><chunk name="Container"><items count="9"><item name="InstanceGuid" type_name="gh_guid" type_code="9">7125C2DE-2668-41C5-A551-47A47ADE8474</item><item name="Name" type_name="gh_string" type_code="10">Panel</item><item name="NickName" type_name="gh_string" type_code="10">4.0</item><item name="UserText" type_name="gh_string" type_code="10">4.0</item><item name="MultiLine" type_name="gh_bool" type_code="1">true</item><item name="DrawIndices" type_name="gh_bool" type_code="1">false</item><item name="DrawPaths" type_name="gh_bool" type_code="1">false</item><item name="Stream" type_name="gh_bool" type_code="1">false</item><item name="Wrap" type_name="gh_bool" type_code="1">true</item></items><chunks count="1"><chunk name="Attributes"><items count="2"><item name="Pivot" type_name="gh_drawing_pointf" type_code="31"><X>420.0</X><Y>296.0</Y></item><item name="Bounds" type_name="gh_drawing_rectanglef" type_code="35"><X>340</X><Y>285</Y><W>160</W><H>22</H></item></items></chunk></chunks></chunk></chunks></chunk><chunk name="Object"><items count="2"><item name="GUID" type_name="gh_guid" type_code="9">59E0B89A-E487-49F8-BAB8-B5BAB16BE14C</item><item name="Name" type_name="gh_string" type_code="10">Panel</item></items><chunks count="1"><chunk name="Container"><items count="9"><item name="InstanceGuid" type_name="gh_guid" type_code="9">0132A13A-D994-4A28-9E8B-57718E25AE12</item><item name="Name" type_name="gh_string" type_code="10">Panel</item><item name="NickName" type_name="gh_string" type_code="10">0.2</item><item name="UserText" type_name="gh_string" type_code="10">0.2</item><item name="MultiLine" type_name="gh_bool" type_code="1">true</item><item name="DrawIndices" type_name="gh_bool" type_code="1">false</item><item name="DrawPaths" type_name="gh_bool" type_code="1">false</item><item name="Stream" type_name="gh_bool" type_code="1">false</item><item name="Wrap" type_name="gh_bool" type_code="1">true</item></items><chunks count="1"><chunk name="Attributes"><items count="2"><item name="Pivot" type_name="gh_drawing_pointf" type_code="31"><X>420.0</X><Y>321.0</Y></item><item name="Bounds" type_name="gh_drawing_rectanglef" type_code="35"><X>340</X><Y>310</Y><W>160</W><H>22</H></item></items></chunk></chunks></chunk></chunks></chunk><chunk name="Object"><items count="2"><item name="GUID" type_name="gh_guid" type_code="9">2E78987B-9DCB-42EA-A7A6-2B68BA0E8B79</item><item name="Name" type_name="gh_string" type_code="10">Boolean Toggle</item></items><chunks count="1"><chunk name="Container"><items count="6"><item name="InstanceGuid" type_name="gh_guid" type_code="9">E02BCD74-6067-4380-B915-58A38E67F2DA</item><item name="Name" type_name="gh_string" type_code="10">Boolean Toggle</item><item name="NickName" type_name="gh_string" type_code="10">move</item><item name="Description" type_name="gh_string" type_code="10">move</item><item name="Optional" type_name="gh_bool" type_code="1">false</item><item name="Value" type_name="gh_bool" type_code="1">false</item></items><chunks count="1"><chunk name="Attributes"><items count="2"><item name="Pivot" type_name="gh_drawing_pointf" type_code="31"><X>385</X><Y>346</Y></item><item name="Bounds" type_name="gh_drawing_rectanglef" type_code="35"><X>350</X><Y>335</Y><W>70</W><H>22</H></item></items></chunk></chunks></chunk></chunks></chunk><chunk name="Object"><items count="2"><item name="GUID" type_name="gh_guid" type_code="9">2E78987B-9DCB-42EA-A7A6-2B68BA0E8B79</item><item name="Name" type_name="gh_string" type_code="10">Boolean Toggle</item></items><chunks count="1"><chunk name="Container"><items count="6"><item name="InstanceGuid" type_name="gh_guid" type_code="9">CDDC41D5-38BE-439E-B720-8DF0BC5495A2</item><item name="Name" type_name="gh_string" type_code="10">Boolean Toggle</item><item name="NickName" type_name="gh_string" type_code="10">close?</item><item name="Description" type_name="gh_string" type_code="10">close?</item><item name="Optional" type_name="gh_bool" type_code="1">false</item><item name="Value" type_name="gh_bool" type_code="1">false</item></items><chunks count="1"><chunk name="Attributes"><items count="2"><item name="Pivot" type_name="gh_drawing_pointf" type_code="31"><X>385</X><Y>371</Y></item><item name="Bounds" type_name="gh_drawing_rectanglef" type_code="35"><X>350</X><Y>360</Y><W>70</W><H>22</H></item></items></chunk></chunks></chunk></chunks></chunk><chunk name="Object"><items count="2"><item name="GUID" type_name="gh_guid" type_code="9">2E78987B-9DCB-42EA-A7A6-2B68BA0E8B79</item><item name="Name" type_name="gh_string" type_code="10">Boolean Toggle</item></items><chunks count="1"><chunk name="Container"><items count="6"><item name="InstanceGuid" type_name="gh_guid" type_code="9">F6F9E967-E640-4057-82A8-8750D8774DC7</item><item name="Name" type_name="gh_string" type_code="10">Boolean Toggle</item><item name="NickName" type_name="gh_string" type_code="10">trigger_gr</item><item name="Description" type_name="gh_string" type_code="10">trigger_gr</item><item name="Optional" type_name="gh_bool" type_code="1">false</item><item name="Value" type_name="gh_bool" type_code="1">false</item></items><chunks count="1"><chunk name="Attributes"><items count="2"><item name="Pivot" type_name="gh_drawing_pointf" type_code="31"><X>385</X><Y>396</Y></item><item name="Bounds" type_name="gh_drawing_rectanglef" type_code="35"><X>350</X><Y>385</Y><W>70</W><H>22</H></item></items></chunk></chunks></chunk></chunks></chunk><chunk name="Object"><items count="2"><item name="GUID" type_name="gh_guid" type_code="9">59E0B89A-E487-49F8-BAB8-B5BAB16BE14C</item><item name="Name" type_name="gh_string" type_code="10">Panel</item></items><chunks count="1"><chunk name="Container"><items count="9"><item name="InstanceGuid" type_name="gh_guid" type_code="9">D359DDF7-B7C8-4D6B-8F2B-70A556B595C7</item><item name="Name" type_name="gh_string" type_code="10">Panel</item><item name="NickName" type_name="gh_string" type_code="10">(ok)</item><item name="UserText" type_name="gh_string" type_code="10">(ok)</item><item name="MultiLine" type_name="gh_bool" type_code="1">true</item><item name="DrawIndices" type_name="gh_bool" type_code="1">false</item><item name="DrawPaths" type_name="gh_bool" type_code="1">false</item><item name="Stream" type_name="gh_bool" type_code="1">false</item><item name="Wrap" type_name="gh_bool" type_code="1">true</item></items><chunks count="1"><chunk name="Attributes"><items count="2"><item name="Pivot" type_name="gh_drawing_pointf" type_code="31"><X>810.0</X><Y>251.0</Y></item><item name="Bounds" type_name="gh_drawing_rectanglef" type_code="35"><X>730</X><Y>240</Y><W>160</W><H>22</H></item></items></chunk></chunks></chunk></chunks></chunk><chunk name="Object"><items count="2"><item name="GUID" type_name="gh_guid" type_code="9">59E0B89A-E487-49F8-BAB8-B5BAB16BE14C</item><item name="Name" type_name="gh_string" type_code="10">Panel</item></items><chunks count="1"><chunk name="Container"><items count="9"><item name="InstanceGuid" type_name="gh_guid" type_code="9">5DD1EBBE-E1C8-4244-AF02-D43095D428C6</item><item name="Name" type_name="gh_string" type_code="10">Panel</item><item name="NickName" type_name="gh_string" type_code="10">(log)</item><item name="UserText" type_name="gh_string" type_code="10">(log)</item><item name="MultiLine" type_name="gh_bool" type_code="1">true</item><item name="DrawIndices" type_name="gh_bool" type_code="1">false</item><item name="DrawPaths" type_name="gh_bool" type_code="1">false</item><item name="Stream" type_name="gh_bool" type_code="1">false</item><item name="Wrap" type_name="gh_bool" type_code="1">true</item></items><chunks count="1"><chunk name="Attributes"><items count="2"><item name="Pivot" type_name="gh_drawing_pointf" type_code="31"><X>840.0</X><Y>350.0</Y></item><item name="Bounds" type_name="gh_drawing_rectanglef" type_code="35"><X>730</X><Y>320</Y><W>220</W><H>60</H></item></items></chunk></chunks></chunk></chunks></chunk>
+      </chunks>
+    </chunk>
+  </chunks>
+</Archive>

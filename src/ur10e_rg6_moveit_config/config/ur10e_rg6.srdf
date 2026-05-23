@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SRDF for the UR10e + OnRobot RG6 combined description.
+  Updated 2026-05-23 to match the rewritten gripper (single rg6_joint
+  master + 6 mimic joints, link names from onrobot_rg.urdf.xacro).
+-->
+<robot name="ur10e_rg6">
+
+  <!-- ============ Planning groups ============ -->
+  <group name="ur_manipulator">
+    <chain base_link="base_link" tip_link="tool0"/>
+  </group>
+
+  <group name="rg6_gripper">
+    <joint name="rg6_joint"/>
+    <!-- Master-side links (driven by rg6_joint via the URDF chain) -->
+    <link name="rg6_finger_1_moment_arm"/>
+    <link name="rg6_finger_1_truss_arm"/>
+    <link name="rg6_finger_1_finger_tip"/>
+    <link name="rg6_finger_1_flex_finger"/>
+    <!-- Mirror-side links (driven via the mimic chain) — listed explicitly
+         so MoveIt's ghost colours both fingers, not just the master side. -->
+    <link name="rg6_finger_2_origin"/>
+    <link name="rg6_finger_2_moment_arm"/>
+    <link name="rg6_finger_2_truss_arm"/>
+    <link name="rg6_finger_2_finger_tip"/>
+    <link name="rg6_finger_2_flex_finger"/>
+  </group>
+
+  <!-- Union group: arm chain + gripper joint, defined with explicit chain
+       and joint so it has a tip link (for Pilz LIN/CIRC) and can carry its
+       own kinematics solver. Adding the gripper links here makes the ghost
+       robot colour both fingers (mimic chain visualised correctly). -->
+  <group name="arm_with_gripper">
+    <chain base_link="base_link" tip_link="tool0"/>
+    <joint name="rg6_joint"/>
+    <link name="rg6_finger_1_moment_arm"/>
+    <link name="rg6_finger_1_truss_arm"/>
+    <link name="rg6_finger_1_finger_tip"/>
+    <link name="rg6_finger_1_flex_finger"/>
+    <link name="rg6_finger_2_origin"/>
+    <link name="rg6_finger_2_moment_arm"/>
+    <link name="rg6_finger_2_truss_arm"/>
+    <link name="rg6_finger_2_finger_tip"/>
+    <link name="rg6_finger_2_flex_finger"/>
+  </group>
+
+  <!-- ============ Named states ============ -->
+  <group_state name="home" group="ur_manipulator">
+    <joint name="shoulder_pan_joint"  value="1.5708"/>
+    <joint name="shoulder_lift_joint" value="-1.5708"/>
+    <joint name="elbow_joint"         value="-1.5708"/>
+    <joint name="wrist_1_joint"       value="-1.5708"/>
+    <joint name="wrist_2_joint"       value="1.5708"/>
+    <joint name="wrist_3_joint"       value="1.5708"/>
+  </group_state>
+
+  <group_state name="up" group="ur_manipulator">
+    <joint name="shoulder_pan_joint"  value="0"/>
+    <joint name="shoulder_lift_joint" value="-1.5708"/>
+    <joint name="elbow_joint"         value="0"/>
+    <joint name="wrist_1_joint"       value="0"/>
+    <joint name="wrist_2_joint"       value="0"/>
+    <joint name="wrist_3_joint"       value="0"/>
+  </group_state>
+
+  <group_state name="open" group="rg6_gripper">
+    <joint name="rg6_joint" value="1.3"/>
+  </group_state>
+
+  <group_state name="closed" group="rg6_gripper">
+    <joint name="rg6_joint" value="0.0"/>
+  </group_state>
+
+  <group_state name="safe" group="rg6_gripper">
+    <joint name="rg6_joint" value="0.08"/>
+  </group_state>
+
+  <!-- ============ End-effector ============ -->
+  <end_effector name="rg6_ee"
+                parent_link="tool0"
+                group="rg6_gripper"
+                parent_group="ur_manipulator"/>
+
+  <!-- ============ Passive (mimic) joints ============ -->
+  <!-- rg6_joint itself is the actuated master. It's commanded directly through
+       the rg6_gripper_controller, NOT planned by MoveIt for ur_manipulator. The
+       mimic joints below follow it automatically through the URDF mimic chain. -->
+  <passive_joint name="rg6_finger_1_truss_arm_joint"/>
+  <passive_joint name="rg6_finger_1_finger_tip_joint"/>
+  <passive_joint name="rg6_finger_2_mirror_joint"/>
+  <passive_joint name="rg6_finger_2_truss_arm_joint"/>
+  <passive_joint name="rg6_finger_2_finger_tip_joint"/>
+
+  <!-- ============ Virtual joint ============ -->
+  <virtual_joint name="world_to_base"
+                 type="fixed"
+                 parent_frame="world"
+                 child_link="base_link"/>
+
+  <!-- ============ Disabled collisions ============ -->
+  <!-- UR10e self-adjacency -->
+  <disable_collisions link1="base_link_inertia" link2="shoulder_link" reason="Adjacent"/>
+  <disable_collisions link1="shoulder_link"     link2="upper_arm_link" reason="Adjacent"/>
+  <disable_collisions link1="upper_arm_link"    link2="forearm_link" reason="Adjacent"/>
+  <disable_collisions link1="forearm_link"      link2="wrist_1_link" reason="Adjacent"/>
+  <disable_collisions link1="wrist_1_link"      link2="wrist_2_link" reason="Adjacent"/>
+  <disable_collisions link1="wrist_2_link"      link2="wrist_3_link" reason="Adjacent"/>
+
+  <!-- Wrist 3 / flange / tool0 / ft_frame are coincident fixed links -->
+  <disable_collisions link1="wrist_3_link" link2="flange" reason="Adjacent"/>
+  <disable_collisions link1="wrist_3_link" link2="tool0"  reason="Adjacent"/>
+  <disable_collisions link1="flange"       link2="tool0"  reason="Adjacent"/>
+  <disable_collisions link1="wrist_3_link" link2="ft_frame" reason="Adjacent"/>
+  <disable_collisions link1="flange"       link2="ft_frame" reason="Adjacent"/>
+  <disable_collisions link1="tool0"        link2="ft_frame" reason="Adjacent"/>
+
+  <!-- Tool0 to gripper bracket / body -->
+  <disable_collisions link1="tool0"        link2="rg6_bracket" reason="Adjacent"/>
+  <disable_collisions link1="flange"       link2="rg6_bracket" reason="Never"/>
+  <disable_collisions link1="wrist_3_link" link2="rg6_bracket" reason="Never"/>
+  <disable_collisions link1="ft_frame"     link2="rg6_bracket" reason="Never"/>
+  <disable_collisions link1="rg6_bracket"  link2="rg6_body" reason="Adjacent"/>
+  <disable_collisions link1="tool0"        link2="rg6_body" reason="Never"/>
+  <disable_collisions link1="flange"       link2="rg6_body" reason="Never"/>
+  <disable_collisions link1="wrist_3_link" link2="rg6_body" reason="Never"/>
+
+  <!-- Body to finger parts (finger_1 = master, finger_2 = mirrored) -->
+  <disable_collisions link1="rg6_body" link2="rg6_finger_1_moment_arm" reason="Adjacent"/>
+  <disable_collisions link1="rg6_body" link2="rg6_finger_1_truss_arm"  reason="Adjacent"/>
+  <disable_collisions link1="rg6_body" link2="rg6_finger_2_moment_arm" reason="Adjacent"/>
+  <disable_collisions link1="rg6_body" link2="rg6_finger_2_truss_arm"  reason="Adjacent"/>
+
+  <!-- Within finger_1 -->
+  <disable_collisions link1="rg6_finger_1_moment_arm" link2="rg6_finger_1_truss_arm"  reason="Adjacent"/>
+  <disable_collisions link1="rg6_finger_1_truss_arm"  link2="rg6_finger_1_finger_tip" reason="Adjacent"/>
+  <disable_collisions link1="rg6_finger_1_finger_tip" link2="rg6_finger_1_flex_finger" reason="Adjacent"/>
+  <disable_collisions link1="rg6_finger_1_moment_arm" link2="rg6_finger_1_finger_tip"  reason="Never"/>
+  <disable_collisions link1="rg6_finger_1_moment_arm" link2="rg6_finger_1_flex_finger" reason="Never"/>
+  <disable_collisions link1="rg6_finger_1_truss_arm"  link2="rg6_finger_1_flex_finger" reason="Never"/>
+
+  <!-- Within finger_2 -->
+  <disable_collisions link1="rg6_finger_2_moment_arm" link2="rg6_finger_2_truss_arm"  reason="Adjacent"/>
+  <disable_collisions link1="rg6_finger_2_truss_arm"  link2="rg6_finger_2_finger_tip" reason="Adjacent"/>
+  <disable_collisions link1="rg6_finger_2_finger_tip" link2="rg6_finger_2_flex_finger" reason="Adjacent"/>
+  <disable_collisions link1="rg6_finger_2_moment_arm" link2="rg6_finger_2_finger_tip"  reason="Never"/>
+  <disable_collisions link1="rg6_finger_2_moment_arm" link2="rg6_finger_2_flex_finger" reason="Never"/>
+  <disable_collisions link1="rg6_finger_2_truss_arm"  link2="rg6_finger_2_flex_finger" reason="Never"/>
+
+  <!-- TCP / ee_link sit near the fingers -->
+  <disable_collisions link1="rg6_body" link2="rg6_tcp"  reason="Adjacent"/>
+  <disable_collisions link1="rg6_tcp"  link2="ee_link"  reason="Adjacent"/>
+  <disable_collisions link1="rg6_finger_1_flex_finger" link2="rg6_tcp"  reason="Never"/>
+  <disable_collisions link1="rg6_finger_2_flex_finger" link2="rg6_tcp"  reason="Never"/>
+  <disable_collisions link1="rg6_finger_1_finger_tip" link2="rg6_tcp"  reason="Never"/>
+  <disable_collisions link1="rg6_finger_2_finger_tip" link2="rg6_tcp"  reason="Never"/>
+
+  <!-- World base adjacency -->
+  <disable_collisions link1="world" link2="base_link" reason="Adjacent"/>
+  <disable_collisions link1="world" link2="base"      reason="Adjacent"/>
+  <disable_collisions link1="world" link2="base_link_inertia" reason="Adjacent"/>
+  <disable_collisions link1="base"  link2="base_link" reason="Adjacent"/>
+  <disable_collisions link1="base"  link2="base_link_inertia" reason="Adjacent"/>
+  <disable_collisions link1="base_link" link2="base_link_inertia" reason="Adjacent"/>
+
+  <!-- Floor: don't flag the robot's mounting interface as colliding.
+       The floor sits below z=0 (URDF places it at z=-0.10) to model a
+       robot mounted on a small riser above the table surface that the
+       URScript targets at z≈0. Arm links still collide with the floor —
+       only base / shoulder need disabled-collision pairs. -->
+  <disable_collisions link1="floor" link2="world" reason="Adjacent"/>
+  <disable_collisions link1="floor" link2="base" reason="Adjacent"/>
+  <disable_collisions link1="floor" link2="base_link" reason="Adjacent"/>
+  <disable_collisions link1="floor" link2="base_link_inertia" reason="Adjacent"/>
+  <disable_collisions link1="floor" link2="shoulder_link" reason="Never"/>
+
+</robot>

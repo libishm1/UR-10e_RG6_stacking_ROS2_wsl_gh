@@ -1,0 +1,70 @@
+rg6_joint_to_width_mm:
+  samples:
+  - angle_rad: 0.0
+    width_mm: 153.16804507082816
+  - angle_rad: 0.05
+    width_mm: 150.44557752675402
+  - angle_rad: 0.1
+    width_mm: 147.35057366029983
+  - angle_rad: 0.15
+    width_mm: 143.89076936928393
+  - angle_rad: 0.2
+    width_mm: 140.07481236260324
+  - angle_rad: 0.25
+    width_mm: 135.912240545462
+  - angle_rad: 0.3
+    width_mm: 131.41345817957756
+  - angle_rad: 0.35
+    width_mm: 126.58970987794463
+  - angle_rad: 0.4
+    width_mm: 121.45305249915717
+  - angle_rad: 0.45
+    width_mm: 116.01632501154285
+  - angle_rad: 0.5
+    width_mm: 110.29311640242786
+  - angle_rad: 0.55
+    width_mm: 104.29773171274589
+  - angle_rad: 0.6
+    width_mm: 98.04515628188483
+  - angle_rad: 0.65
+    width_mm: 91.55101829214301
+  - angle_rad: 0.7
+    width_mm: 84.83154970641411
+  - angle_rad: 0.75
+    width_mm: 77.90354569672971
+  - angle_rad: 0.8
+    width_mm: 70.78432266507996
+  - angle_rad: 0.85
+    width_mm: 63.491674961424465
+  - angle_rad: 0.9
+    width_mm: 56.04383040708455
+  - angle_rad: 0.95
+    width_mm: 48.45940473468364
+  - angle_rad: 1.0
+    width_mm: 40.75735505851045
+  - angle_rad: 1.05
+    width_mm: 32.95693249160539
+  - angle_rad: 1.1
+    width_mm: 25.077634028003562
+  - angle_rad: 1.15
+    width_mm: 17.139153810405144
+  - angle_rad: 1.2
+    width_mm: 9.16133390507427
+  - angle_rad: 1.25
+    width_mm: 1.1641147070045774
+  - angle_rad: 1.3
+    width_mm: 6.832514900679012
+  cubic_width_of_angle:
+  - 44.75467887248408
+  - -123.42758374281954
+  - -32.58114429728682
+  - 151.89305571424748
+  cubic_angle_of_width:
+  - -2.6099599420375144e-07
+  - 4.1813067808223386e-05
+  - -0.008619747100961887
+  - 1.2951318123088063
+  min_angle_rad: 0.0
+  max_angle_rad: 1.3
+  min_width_mm: 1.1641147070045774
+  max_width_mm: 153.16804507082816

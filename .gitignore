@@ -1,0 +1,34 @@
+# ROS 2 colcon build artifacts
+build/
+install/
+log/
+
+# Generated URDF dump (regenerated from xacro on build)
+ur10e_rg6.urdf
+
+# Vendor packages — bootstrap with `vcs import` (see README).
+# Keep our overlay xacro (ur10e_rg6.urdf.xacro) that lives inside the UR
+# description package; everything else there is upstream.
+src/Universal_Robots_ROS2_Description/*
+!src/Universal_Robots_ROS2_Description/urdf/
+src/Universal_Robots_ROS2_Description/urdf/*
+!src/Universal_Robots_ROS2_Description/urdf/ur10e_rg6.urdf.xacro
+src/Universal_Robots_ROS2_Driver/
+src/moveit2/
+src/moveit_resources/
+src/onrobot1_ros/
+src/ur_client_library/
+src/ur_msgs/
+
+# Editor / OS noise
+.vscode/
+.idea/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+Thumbs.db
+
+# Temp files
+*.swp
+*~

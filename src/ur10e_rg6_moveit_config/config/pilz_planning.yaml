@@ -1,0 +1,18 @@
+# Pilz Industrial Motion Planner — analytic LIN / PTP / CIRC primitives.
+# Best for predictable, deterministic robot motion (industrial use cases).
+#   PTP  — point-to-point joint-space motion (synchronous, time-optimal)
+#   LIN  — linear Cartesian motion (straight line in workspace)
+#   CIRC — circular Cartesian motion (arc through aux point)
+
+planning_plugin: pilz_industrial_motion_planner/CommandPlanner
+
+# Re-parameterize Pilz's output through TOTG so the per-controller trajectory
+# split can't end up with consecutive duplicate timestamps (the JTC rejects
+# those). This preserves Pilz's *path* (PTP/LIN/CIRC) but recomputes timing.
+request_adapters: >-
+  default_planner_request_adapters/AddTimeOptimalParameterization
+
+default_planner_config: PTP
+capabilities: >-
+  pilz_industrial_motion_planner/MoveGroupSequenceAction
+  pilz_industrial_motion_planner/MoveGroupSequenceService

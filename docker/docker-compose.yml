@@ -1,0 +1,127 @@
+# Orchestrates the UR10e + RG6 stack.
+# Usage (from ~/ur_rg6_ws):
+#   docker compose -f docker/docker-compose.yml build ur10e_rg6
+#   docker compose -f docker/docker-compose.yml up rviz_view
+#   docker compose -f docker/docker-compose.yml up ur_fake
+#   ROBOT_IP=192.168.1.102 docker compose -f docker/docker-compose.yml up ur_real
+#   docker compose -f docker/docker-compose.yml up rosbridge
+
+services:
+  # Reusable build target — only used to build the image.
+  ur10e_rg6:
+    image: ur10e_rg6:humble
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    profiles: [build_only]
+
+  # 1. Just visualize the URDF in RViz (fast sanity check)
+  rviz_view:
+    image: ur10e_rg6:humble
+    container_name: ur10e_rg6_rviz
+    network_mode: host
+    ipc: host
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_X11_NO_MITSHM=1
+      - LIBGL_ALWAYS_INDIRECT=${LIBGL_ALWAYS_INDIRECT:-0}
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}
+      - XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir
+      - PULSE_SERVER=${PULSE_SERVER:-}
+    volumes:
+      - ..:/workspace:cached
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+      - /mnt/wslg:/mnt/wslg
+    command: >
+      bash -lc "ros2 launch ur_description view_ur10e_rg6_full.launch.py"
+
+  # 2. Full driver + controllers in fake-hardware mode (no real robot)
+  ur_fake:
+    image: ur10e_rg6:humble
+    container_name: ur10e_rg6_fake
+    network_mode: host
+    ipc: host
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_X11_NO_MITSHM=1
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}
+      - XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir
+    volumes:
+      - ..:/workspace:cached
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+      - /mnt/wslg:/mnt/wslg
+    command: >
+      bash -lc "ros2 launch onrobot_description ur10e_rg6_control.launch.py use_fake_hardware:=true"
+
+  # 3. Full driver against a physical UR10e (set ROBOT_IP)
+  ur_real:
+    image: ur10e_rg6:humble
+    container_name: ur10e_rg6_real
+    network_mode: host
+    ipc: host
+    pid: host
+    privileged: true
+    cap_add: [SYS_NICE]
+    ulimits:
+      rtprio: 99
+      memlock: -1
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_X11_NO_MITSHM=1
+      - ROBOT_IP=${ROBOT_IP:-192.168.1.102}
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}
+      - XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir
+    volumes:
+      - ..:/workspace:cached
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+      - /mnt/wslg:/mnt/wslg
+    command: >
+      bash -lc "ros2 launch onrobot_description ur10e_rg6_control.launch.py use_fake_hardware:=false robot_ip:=${ROBOT_IP:-192.168.1.102}"
+
+  # 4. rosbridge_server so Rhino/Grasshopper (roslibpy) can talk to ROS 2
+  rosbridge:
+    image: ur10e_rg6:humble
+    container_name: ur10e_rg6_rosbridge
+    network_mode: host
+    ipc: host
+    volumes:
+      - ..:/workspace:cached
+    command: >
+      bash -lc "ros2 launch rosbridge_server rosbridge_websocket_launch.xml"
+
+  # 5. Full MoveIt 2 demo (RViz with motion-planning panel, fake hardware)
+  moveit:
+    image: ur10e_rg6:humble
+    container_name: ur10e_rg6_moveit
+    network_mode: host
+    ipc: host
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_X11_NO_MITSHM=1
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}
+      - XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir
+    volumes:
+      - ..:/workspace:cached
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+      - /mnt/wslg:/mnt/wslg
+    command: >
+      bash -lc "ros2 launch ur10e_rg6_moveit_config demo.launch.py use_fake_hardware:=true"
+
+  # 6. Interactive shell for debugging inside the container
+  shell:
+    image: ur10e_rg6:humble
+    container_name: ur10e_rg6_shell
+    network_mode: host
+    ipc: host
+    stdin_open: true
+    tty: true
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_X11_NO_MITSHM=1
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}
+      - XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir
+    volumes:
+      - ..:/workspace:cached
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+      - /mnt/wslg:/mnt/wslg
+    command: bash

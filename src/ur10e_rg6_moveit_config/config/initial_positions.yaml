@@ -1,0 +1,8 @@
+initial_positions:
+  shoulder_pan_joint:   1.5708
+  shoulder_lift_joint: -1.5708
+  elbow_joint:         -1.5708
+  wrist_1_joint:       -1.5708
+  wrist_2_joint:        1.5708
+  wrist_3_joint:        1.5708
+  rg6_joint:            0.77    # ~70 mm finger gap at boot

@@ -1,0 +1,92 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+  - Class: moveit_ros_visualization/MotionPlanning
+    Name: MotionPlanning
+
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Marker Scale: 0.15
+      Show Names: false
+      Show Axes: true
+      Show Arrows: false
+      Frames:
+        All Enabled: false
+        world: { Value: true }
+        base_link: { Value: true }
+        tool0: { Value: true }
+        rg6_tcp: { Value: true }
+        rg6_body: { Value: false }
+        rg6_bracket: { Value: false }
+        rg6_finger_1_origin: { Value: false }
+        rg6_finger_1_moment_arm: { Value: false }
+        rg6_finger_1_truss_arm: { Value: false }
+        rg6_finger_1_finger_tip: { Value: false }
+        rg6_finger_1_flex_finger: { Value: false }
+        rg6_finger_2_origin: { Value: false }
+        rg6_finger_2_moment_arm: { Value: false }
+        rg6_finger_2_truss_arm: { Value: false }
+        rg6_finger_2_finger_tip: { Value: false }
+        rg6_finger_2_flex_finger: { Value: false }
+        base: { Value: false }
+        base_link_inertia: { Value: false }
+        shoulder_link: { Value: false }
+        upper_arm_link: { Value: false }
+        forearm_link: { Value: false }
+        wrist_1_link: { Value: false }
+        wrist_2_link: { Value: false }
+        wrist_3_link: { Value: false }
+        flange: { Value: false }
+        ft_frame: { Value: false }
+        ee_link: { Value: false }
+    - Class: rviz_default_plugins/RobotModel
+      Name: RobotModel
+      Enabled: true
+      Description Topic:
+        Value: /robot_description
+    - Class: moveit_rviz_plugin/MotionPlanning
+      Name: MotionPlanning
+      Enabled: true
+      Move Group Namespace: ""
+      Planning Request:
+        Planning Group: arm_with_gripper
+        Query Start State: false
+        Query Goal State: true                 # ghost on for interactive control
+        Interactive Marker Size: 0.30          # ← bigger, easier to grab
+        Goal State Alpha: 0.40
+        Start State Alpha: 1.0
+        Colliding Link Color: 255; 0; 0
+      Planning Scene Topic: /monitored_planning_scene
+      Robot Description: robot_description
+      Scene Geometry:
+        Scene Alpha: 1.0
+      Scene Robot:
+        Robot Alpha: 1.0                       # ← solid live robot
+        Show Robot Collision: false
+        Show Robot Visual: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: world
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 2.0
+      Focal Point: { X: 0, Y: 0, Z: 0.6 }
+
+Window Geometry:
+  Height: 900
+  Width: 1400

@@ -1,0 +1,58 @@
+# Joint limits for MoveIt time parameterization + Pilz.
+#
+# Pilz's JointLimitsAggregator (Humble) iterates only ACTIVE joints from
+# model->getActiveJointModels(); fixed and mimic joints are skipped at the
+# aggregator level. So only entries here for ACTIVE joints have any effect.
+# Pilz also requires the full quartet — has_{velocity,acceleration}_limits
+# both true with concrete max_velocity / max_acceleration values — otherwise
+# the aggregator silently skips the joint and Pilz's container_.at() throws
+# `std::out_of_range` ("map::at").
+
+default_velocity_scaling_factor: 0.2
+default_acceleration_scaling_factor: 0.2
+
+joint_limits:
+  shoulder_pan_joint:
+    has_velocity_limits: true
+    max_velocity: 3.14
+    has_acceleration_limits: true
+    max_acceleration: 4.0
+
+  shoulder_lift_joint:
+    has_velocity_limits: true
+    max_velocity: 3.14
+    has_acceleration_limits: true
+    max_acceleration: 4.0
+
+  elbow_joint:
+    has_velocity_limits: true
+    max_velocity: 3.14
+    has_acceleration_limits: true
+    max_acceleration: 4.0
+
+  wrist_1_joint:
+    has_velocity_limits: true
+    max_velocity: 6.28
+    has_acceleration_limits: true
+    max_acceleration: 8.0
+
+  wrist_2_joint:
+    has_velocity_limits: true
+    max_velocity: 6.28
+    has_acceleration_limits: true
+    max_acceleration: 8.0
+
+  wrist_3_joint:
+    has_velocity_limits: true
+    max_velocity: 6.28
+    has_acceleration_limits: true
+    max_acceleration: 8.0
+
+  # Master gripper joint — included as an active joint in `arm_with_gripper`
+  # and `rg6_gripper`. Pilz takes the most-strict limit across all group joints,
+  # so keeping this comparable to the arm avoids dragging arm speed down.
+  rg6_joint:
+    has_velocity_limits: true
+    max_velocity: 3.0
+    has_acceleration_limits: true
+    max_acceleration: 4.0

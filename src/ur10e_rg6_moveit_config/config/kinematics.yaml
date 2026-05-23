@@ -1,0 +1,34 @@
+# Faster IK by switching from KDL to LMA (Levenberg-Marquardt), with caching
+# wrapper for repeat queries (interactive markers, RViz dragging, etc).
+#
+# Available plugins on this system (`/opt/ros/humble/share/moveit_kinematics/`):
+#   kdl_kinematics_plugin/KDLKinematicsPlugin                  (default, slow)
+#   lma_kinematics_plugin/LMAKinematicsPlugin                  (faster)
+#   cached_ik_kinematics_plugin/CachedKDLKinematicsPlugin
+#   cached_ik_kinematics_plugin/CachedLMAKinematicsPlugin      (← chosen)
+#
+# Upgrade path: `sudo apt install ros-humble-pick-ik` would unlock pick_ik
+# (~10× LMA on industrial 6-DOF arms). Set:
+#   kinematics_solver: pick_ik/PickIkPlugin
+#   mode: global         # or "local" for nearest-IK
+#   memetic_num_threads: 4
+# inside the ur_manipulator block.
+
+ur_manipulator:
+  kinematics_solver: lma_kinematics_plugin/LMAKinematicsPlugin
+  kinematics_solver_search_resolution: 0.005
+  kinematics_solver_timeout: 0.02
+  kinematics_solver_attempts: 3
+
+# arm_with_gripper deliberately has NO kinematics solver: it's a union group
+# (arm chain + gripper joint + mimic links). KDL/LMA both require pure chains
+# and refuse with "Group 'arm_with_gripper' is not a chain". Consequence:
+#   - Pilz PTP works on arm_with_gripper (joint-space, no IK needed)
+#   - Pilz LIN/CIRC do NOT work on arm_with_gripper (need IK)
+#   - For Cartesian (LIN/CIRC) moves, use the `ur_manipulator` group
+#   - For Cartesian gumball, use `ur_manipulator` (the gumball needs IK)
+
+# rg6_gripper has no kinematics_solver on purpose: it's a 1-DOF revolute joint
+# and a Cartesian interactive marker on it doesn't mean anything. Without an IK
+# plugin, MoveIt won't put a gumball on the gripper group, so the user can't
+# accidentally drag-target the gripper. Drive it from the Joints tab only.
