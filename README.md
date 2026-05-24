@@ -15,6 +15,13 @@ python3 tests/play_pickplace.py
 
 See `SESSION_HANDOFF.md` for the full project state, design notes, and
 real-hardware path. See `LAUNCH_RUNBOOK.md` for manual launch / debug steps.
+For WSL2 ↔ UR10e networking (fallback ladder + diagnostic recipes), see
+[`docs/WSL2_UR10e_NETWORKING.md`](docs/WSL2_UR10e_NETWORKING.md).
+
+```bash
+# Real-hardware pre-flight (run before `ros2 launch ... use_fake_hardware:=false`)
+~/ur_rg6_ws/tests/check_real_hw_network.sh 192.168.1.100
+```
 
 ## Docker (no ROS install needed)
 
