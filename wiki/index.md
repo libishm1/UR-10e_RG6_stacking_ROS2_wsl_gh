@@ -20,6 +20,8 @@ let it die in a chat transcript.
   shipped in the reference repos: (A) onrobot_interface C++ ros2_control plugin
   via UR tool I/O pins, (B) onrobot_driver Python standalone node (same pins),
   (C) URScript topic via the URCap. Which one to pick and why.
+- [Locked decisions](decisions.md) — design choices that shouldn't drift
+  across sessions. Currently: **RG6 control = Mechanism C** (URScript topic).
 - [WSL2 networking deep-dive](../docs/WSL2_UR10e_NETWORKING.md) — fallback
   ladder (mirrored → bridged → NAT+portproxy → native Linux). Lives outside
   the wiki because it's a setup guide users follow step-by-step.

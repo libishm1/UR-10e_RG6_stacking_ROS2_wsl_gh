@@ -1,5 +1,9 @@
 # RG6 control from ROS 2 — three mechanisms in the reference repos
 
+> **Locked decision (2026-05-24):** this workspace uses **Mechanism C**
+> (URScript topic) for real hardware. See [decisions.md](decisions.md).
+> The A/B comparison below is kept for context and to explain why C won.
+
 ## Purpose
 
 The vendored repos under `~/ur_rg6_ws/src/` ship THREE different ways to
