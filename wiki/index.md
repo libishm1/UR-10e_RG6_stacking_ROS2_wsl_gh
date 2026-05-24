@@ -16,6 +16,10 @@ let it die in a chat transcript.
 - [Path B vs ROS 2 driver comparison](path_b_vs_ros_driver.md) — robot_ws's
   SFTP+Dashboard URScript-deploy workflow vs the ROS 2 driver's streaming
   External Control URCap path. When to use which.
+- [RG6 control mechanisms](rg6_control_mechanisms.md) — the three ROS 2 paths
+  shipped in the reference repos: (A) onrobot_interface C++ ros2_control plugin
+  via UR tool I/O pins, (B) onrobot_driver Python standalone node (same pins),
+  (C) URScript topic via the URCap. Which one to pick and why.
 - [WSL2 networking deep-dive](../docs/WSL2_UR10e_NETWORKING.md) — fallback
   ladder (mirrored → bridged → NAT+portproxy → native Linux). Lives outside
   the wiki because it's a setup guide users follow step-by-step.
