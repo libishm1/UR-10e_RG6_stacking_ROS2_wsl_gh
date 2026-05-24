@@ -84,15 +84,8 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 2.5
-      Focal Point: { X: 0.4, Y: 0.0, Z: 0.4 }
-      # Match Grasshopper's Perspective viewport: eye at roughly (-X, -Y, +Z)
-      # looking back toward origin. In Orbit camera that's Yaw between pi and
-      # 3pi/2 — picking 5pi/4 (≈3.927). Pitch ~0.6 for a 35° downward look,
-      # similar to Rhino's default Perspective elevation.
-      Yaw: 3.927
-      Pitch: 0.6
-      Target Frame: world
+      Distance: 2.0
+      Focal Point: { X: 0, Y: 0, Z: 0.6 }
 
 Window Geometry:
   Height: 900

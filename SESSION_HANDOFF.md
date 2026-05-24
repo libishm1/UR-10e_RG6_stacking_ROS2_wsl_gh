@@ -3,6 +3,40 @@
 Last updated: 2026-05-23. Read this first; it covers the current state and how
 to pick up where we left off.
 
+## CHECKPOINT — 2026-05-24 (visual orientation experiments — REVERTED to defaults)
+
+**Status:** Visual orientation mismatch between ROS RViz and the real cell
+is **UNRESOLVED**. User reports the real robot has its arm hanging OVER the
+cable side at HOME (cable exits the manufacturer's "back" = -X in base_link),
+while our ROS RViz with default URDF shows the arm at +X (manufacturer's
+"front"). User also reports Grasshopper does not match either of those.
+
+**What we tried:**
+- URDF `<origin rpy="0 0 3.14159">` (180° yaw on the UR mount). Pick-place
+  passed 10/10 each time (kinematics + base_link-anchored boxes work fine),
+  but user reports it still didn't visually match the real cell or Grasshopper.
+- RViz camera angle changes (Yaw=π, then Yaw=5π/4). Didn't help either.
+
+**Current state (all reverted to clean defaults):**
+- URDF `<origin xyz="0 0 0" rpy="0 0 0">` — default mount
+- moveit.rviz Views back to simple `Distance: 2.0, Focal Point: (0,0,0.6)`
+- VEL_SCALE = 0.08 in play_pickplace.py, ACC_SCALE = 0.08 — slow/safe for real hw
+- VEL_SCALE = 0.05 in real_hw_smoke.py — even slower for first-ever real-hw test
+
+**What we KEPT (good improvements regardless of orientation):**
+- Boxes + pedestal in `play_pickplace.py` are `BASE_LINK`-anchored, NOT `world`.
+  Lets future base-rotation experiments work without box drift.
+- Dual-RViz fix: `onrobot1_ros/...ur10e_rg6_control.launch.py` passes
+  `launch_rviz: 'false'` (caveat: vendor dir, gets wiped on `vcs import`).
+- HOME = `[1.5708, -1.5708, -1.5708, -1.5708, 1.5708, 1.5708]` everywhere.
+
+**Next step is real-hardware verification, not more guessing in sim.**
+Per user 2026-05-24: bring up the real cell at slow speeds (real_hw_smoke.py
+first with `--no-gripper`, then `--real-gripper --force 25 --max 1`). When
+the arm physically moves you can compare its real orientation to what RViz
+shows at the same joint values, and the orientation mismatch becomes a
+single concrete number (yaw degrees).
+
 ## CHECKPOINT — 2026-05-24 (later, RViz visual cleanup)
 
 - **Dual-RViz bug fixed.** `onrobot1_ros/onrobot_description/launch/ur10e_rg6_control.launch.py`
