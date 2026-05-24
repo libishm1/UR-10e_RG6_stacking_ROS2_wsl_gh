@@ -3,6 +3,34 @@
 Last updated: 2026-05-23. Read this first; it covers the current state and how
 to pick up where we left off.
 
+## CHECKPOINT — 2026-05-24 (real-hardware bring-up prep)
+
+Added the real-hardware path end-to-end:
+
+- [`docs/WSL2_UR10e_NETWORKING.md`](docs/WSL2_UR10e_NETWORKING.md) — deep
+  dive on WSL2 ↔ UR10e with a four-level fallback ladder
+  (mirrored → bridged → NAT+portproxy → native Linux), diagnostic recipes
+  for the canonical failures, and a user-only-tasks table.
+- [`tests/check_real_hw_network.sh`](tests/check_real_hw_network.sh) —
+  pre-flight diagnostic: ICMP + TCP probes on all 5 UR ports + Dashboard
+  handshake + reverse-channel listener check. Run before every real-HW
+  launch.
+- [`src/ur10e_rg6_moveit_config/launch/full_stack.launch.py`](src/ur10e_rg6_moveit_config/launch/full_stack.launch.py)
+  bug fix — `robot_ip` arg is now forwarded to the onrobot child launch
+  (was silently defaulting to `127.0.0.1` for real-hardware launches).
+- Verified cell config saved here (Networking section below) sourced
+  from `D:\robot_ws\robots\outputs\2026-05-09\SESSION_CLOSE.md`:
+  laptop 192.168.1.35, cabinet 192.168.1.100, SSH key at
+  `D:\robot_ws\robots\outputs\2026-05-09\ssh_setup\robots_workspace_key`
+  already enrolled on the pendant.
+- Test verification (against the still-running fake-HW stack):
+  `test_groups.py` PASS on all 3 groups, `gripper_test.py` clean,
+  `play_pickplace.py` 10/10 earlier today.
+
+GitHub: pushed to https://github.com/libishm1/UR-10e_RG6_stacking_ROS2_wsl_gh
+with `ros2.repos` (pinned vendor packages), `docker/Dockerfile.full`
+(self-contained image), and the networking docs above.
+
 ## CHECKPOINT — 2026-05-23 (mid-session)
 
 Most-recent verified milestone: **`play_pickplace.py` ran 10/10 boxes** in sim
