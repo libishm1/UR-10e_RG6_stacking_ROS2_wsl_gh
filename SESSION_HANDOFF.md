@@ -15,6 +15,11 @@ Added the real-hardware path end-to-end:
   pre-flight diagnostic: ICMP + TCP probes on all 5 UR ports + Dashboard
   handshake + reverse-channel listener check. Run before every real-HW
   launch.
+- [`tests/real_hw_smoke.py`](tests/real_hw_smoke.py) — minimal arm Z up/down
+  + gripper cycle around HOME at 5% speed. Joint perturbation hard-capped
+  at 0.10 rad (≈ 6 cm TCP). Dry-run by default; `--yes` to execute.
+  Use this as the FIRST motion test on real hardware — arm-only first,
+  then add `--real-gripper` for the URCap path.
 - [`src/ur10e_rg6_moveit_config/launch/full_stack.launch.py`](src/ur10e_rg6_moveit_config/launch/full_stack.launch.py)
   bug fix — `robot_ip` arg is now forwarded to the onrobot child launch
   (was silently defaulting to `127.0.0.1` for real-hardware launches).

@@ -354,15 +354,29 @@ ros2 launch ur10e_rg6_moveit_config full_stack.launch.py \
    [ur_robot_driver]: Robot connected to reverse interface
    [ur_robot_driver]: Ready to receive control commands
    ```
-9. From a separate WSL terminal, run the gripper-only smoke test:
+9. From a separate WSL terminal, run the minimal smoke test
+   (dry-run first to see exactly what would be commanded):
    ```bash
-   python3 ~/ur_rg6_ws/tests/gripper_test.py --no-arm --real --force 25 --widths 100 80 100
+   python3 ~/ur_rg6_ws/tests/real_hw_smoke.py             # dry-run
+   python3 ~/ur_rg6_ws/tests/real_hw_smoke.py --yes       # real arm + sim gripper (NO URCap call)
    ```
-10. If gripper actuates cleanly, run one pick-place cycle at low force:
+   This does HOME → +3 cm TCP-Z → close → HOME → -3 cm → open → HOME
+   at 5 % speed. Joint perturbation is hard-capped at 0.10 rad
+   (≈ 6 cm) regardless of CLI args. **Use this BEFORE the gripper
+   URScript path — it isolates the arm bring-up from the URCap.**
+10. Add the URCap gripper path:
+    ```bash
+    python3 ~/ur_rg6_ws/tests/real_hw_smoke.py --yes --real-gripper --force 25
+    ```
+11. Gripper-only sweep (no arm motion):
+    ```bash
+    python3 ~/ur_rg6_ws/tests/gripper_test.py --no-arm --real --force 25 --widths 100 80 100
+    ```
+12. One pick-place cycle at low force:
     ```bash
     python3 ~/ur_rg6_ws/tests/play_pickplace.py --real-gripper --force 25 --max 1
     ```
-11. If clean, run the full 10-cycle program at normal force:
+13. Full 10-cycle program at normal force:
     ```bash
     python3 ~/ur_rg6_ws/tests/play_pickplace.py --real-gripper --force 40
     ```

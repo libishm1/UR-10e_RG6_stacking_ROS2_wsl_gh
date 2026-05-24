@@ -21,6 +21,11 @@ For WSL2 ↔ UR10e networking (fallback ladder + diagnostic recipes), see
 ```bash
 # Real-hardware pre-flight (run before `ros2 launch ... use_fake_hardware:=false`)
 ~/ur_rg6_ws/tests/check_real_hw_network.sh 192.168.1.100
+
+# Minimal smoke test (dry-run first, then --yes to actually move)
+python3 ~/ur_rg6_ws/tests/real_hw_smoke.py                       # dry-run
+python3 ~/ur_rg6_ws/tests/real_hw_smoke.py --yes                 # sim arm + sim gripper
+python3 ~/ur_rg6_ws/tests/real_hw_smoke.py --yes --real-gripper  # real arm + real gripper
 ```
 
 ## Docker (no ROS install needed)
