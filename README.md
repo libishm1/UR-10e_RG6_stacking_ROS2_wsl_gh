@@ -18,22 +18,26 @@ real-hardware path. See `LAUNCH_RUNBOOK.md` for manual launch / debug steps.
 
 The vendor packages under `src/` (`moveit2`, `Universal_Robots_*`, `ur_msgs`,
 `ur_client_library`, `onrobot1_ros`, `moveit_resources`) are excluded from
-this repo via `.gitignore`. Recreate them with:
+this repo via `.gitignore`. They are pinned to exact commits in
+[`ros2.repos`](ros2.repos) and bootstrapped with `vcs import`:
 
 ```bash
-cd ~/ur_rg6_ws/src
-git clone -b humble https://github.com/ros-planning/moveit2.git
-git clone -b humble https://github.com/UniversalRobots/Universal_Robots_ROS2_Description.git
-git clone -b humble https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver.git
-git clone -b ros2 https://github.com/inria-paris-robotics-lab/onrobot_ros.git onrobot1_ros
-git clone -b humble https://github.com/UniversalRobots/Universal_Robots_Client_Library.git ur_client_library
-git clone -b ros2 https://github.com/ros-industrial/ur_msgs.git
-cd .. && rosdep install --from-paths src --ignore-src -r -y
+sudo apt install python3-vcstool python3-colcon-common-extensions python3-rosdep
+cd ~/ur_rg6_ws
+vcs import src < ros2.repos
+rosdep install --from-paths src --ignore-src -r -y
 colcon build --symlink-install
+source install/setup.bash
 ```
 
-The combined URDF (`ur10e_rg6.urdf.xacro`) and SRDF live in this repo and
-overlay the upstream UR description.
+To track upstream HEADs instead of the pinned SHAs, change each
+`version:` field in `ros2.repos` from a commit hash to a branch name
+(`humble` for the UR + MoveIt packages, `ros2` for `onrobot1_ros` and
+`moveit_resources`, `master` for `ur_client_library`), then re-run
+`vcs import src < ros2.repos --force`.
+
+The combined URDF (`ur10e_rg6.urdf.xacro`) and SRDF live in this repo
+and overlay the upstream UR description after import.
 
 ## Packages in this repo
 

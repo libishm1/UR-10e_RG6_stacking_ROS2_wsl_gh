@@ -1,0 +1,36 @@
+# Vendor packages for the UR10e + RG6 stack.
+# Bootstrap with:  cd ~/ur_rg6_ws && vcs import src < ros2.repos
+# (install vcstool first: `sudo apt install python3-vcstool`)
+#
+# Versions are pinned to the exact commits in use on 2026-05-23. Bump
+# `version:` to a branch name (e.g. `humble`) to track HEAD, or to a newer
+# SHA to update.
+repositories:
+  Universal_Robots_ROS2_Description:
+    type: git
+    url: https://github.com/UniversalRobots/Universal_Robots_ROS2_Description.git
+    version: 1a36a031aff57ba3bbb1eab4d2d6dad93657e7c6
+  Universal_Robots_ROS2_Driver:
+    type: git
+    url: https://github.com/UniversalRobots/Universal_Robots_ROS2_Driver.git
+    version: 278cb9507cf2bba7da47ea8feac64a1cefc0a58d
+  ur_client_library:
+    type: git
+    url: https://github.com/UniversalRobots/Universal_Robots_Client_Library.git
+    version: 13cead22e7c9460677c73d77b1a79709738bee4e
+  ur_msgs:
+    type: git
+    url: https://github.com/ros-industrial/ur_msgs.git
+    version: db56661086339e217ed81e8a2d69468ca3fb426b
+  onrobot1_ros:
+    type: git
+    url: https://github.com/libishm1/onrobot1_ros.git
+    version: 9c6ce32d84bd903d59120c2a95d4a115d6e33cde
+  moveit2:
+    type: git
+    url: https://github.com/ros-planning/moveit2.git
+    version: 53979331bcaa472ddd3a3fc895907172df01374d
+  moveit_resources:
+    type: git
+    url: https://github.com/ros-planning/moveit_resources.git
+    version: 595f04ee736c9547ab1e7253e46005107277e36c
