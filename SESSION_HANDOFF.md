@@ -30,6 +30,20 @@ while our ROS RViz with default URDF shows the arm at +X (manufacturer's
   `launch_rviz: 'false'` (caveat: vendor dir, gets wiped on `vcs import`).
 - HOME = `[1.5708, -1.5708, -1.5708, -1.5708, 1.5708, 1.5708]` everywhere.
 
+**New: `tests/measure_real_robot_pose.py` — pure read-only RTDE measurement.**
+Connects to the real UR10e on port 30004 via `ur_rtde.RTDEReceiveInterface`,
+samples joint angles + TCP pose for ~1 s, prints a comparison vs our ROS
+HOME constant. **Never writes to the robot** — RTDEControlInterface /
+URScript / Dashboard are all gated out (import check on entry).
+- Use to verify the robot is at HOME and that our kinematic model agrees
+  (TCP-in-base-frame matches between ROS URDF and the real cabinet).
+- Will NOT solve the URDF-vs-room yaw mismatch from RTDE data alone —
+  that requires visual observation of the cabinet's physical orientation,
+  documented in the script's Verdict section.
+- Loopback hard-refused unless `--allow-loopback` so URSim can't be
+  mistaken for the real cell.
+- Install: `pip3 install --user ur_rtde`.
+
 **Next step is real-hardware verification, not more guessing in sim.**
 Per user 2026-05-24: bring up the real cell at slow speeds (real_hw_smoke.py
 first with `--no-gripper`, then `--real-gripper --force 25 --max 1`). When
