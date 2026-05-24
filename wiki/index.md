@@ -22,6 +22,9 @@ let it die in a chat transcript.
   (C) URScript topic via the URCap. Which one to pick and why.
 - [Locked decisions](decisions.md) — design choices that shouldn't drift
   across sessions. Currently: **RG6 control = Mechanism C** (URScript topic).
+- [RViz GPU rendering under WSL2](rviz_gpu_rendering.md) — verified
+  D3D12 passthrough via WSLg to Intel UHD 630. How to confirm,
+  what to do if you ever see `llvmpipe` fallback.
 - [WSL2 networking deep-dive](../docs/WSL2_UR10e_NETWORKING.md) — fallback
   ladder (mirrored → bridged → NAT+portproxy → native Linux). Lives outside
   the wiki because it's a setup guide users follow step-by-step.
