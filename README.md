@@ -4,6 +4,8 @@ UR10e + OnRobot RG6 pick-and-place stack on ROS 2 Humble + MoveIt 2, running
 in WSL2 (Ubuntu 22.04) on Windows. Plays an 80-waypoint URScript program in
 simulation with visualised box stacking.
 
+<img width="800" height="600" alt="ros_resized" src="https://github.com/user-attachments/assets/e9eb7a84-4d89-4c94-bcba-aea8f4069cce" />
+
 ## Quick start
 
 ```bash
