@@ -1,0 +1,97 @@
+# UR10e + OnRobot RG6 — self-contained ROS 2 Humble image.
+# Clones the public repo, imports vendor packages via ros2.repos, and builds
+# the workspace at image-build time so `docker run` has everything ready.
+#
+# Build:
+#   docker build -f docker/Dockerfile.full -t ur10e_rg6:full .
+#   # or, with a different fork / branch:
+#   docker build -f docker/Dockerfile.full \
+#     --build-arg REPO_URL=https://github.com/libishm1/UR-10e_RG6_stacking_ROS2_wsl_gh.git \
+#     --build-arg REPO_REF=main \
+#     -t ur10e_rg6:full .
+#
+# Run (fake hardware, MoveIt + RViz):
+#   docker run --rm -it --network host --ipc host \
+#     -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix:ro \
+#     -v /mnt/wslg:/mnt/wslg \
+#     ur10e_rg6:full \
+#     ros2 launch ur10e_rg6_moveit_config full_stack.launch.py
+#
+# Run the pick-and-place demo against that same container (separate shell):
+#   docker exec -it <container> python3 /workspace/tests/play_pickplace.py
+FROM osrf/ros:humble-desktop
+
+ARG REPO_URL=https://github.com/libishm1/UR-10e_RG6_stacking_ROS2_wsl_gh.git
+ARG REPO_REF=main
+ARG DEBIAN_FRONTEND=noninteractive
+ENV ROS_DISTRO=humble \
+    PYTHONUNBUFFERED=1 \
+    WORKSPACE=/workspace
+
+# ---------- 1. System / ROS apt deps ----------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git \
+        build-essential \
+        cmake \
+        python3-pip \
+        python3-colcon-common-extensions \
+        python3-rosdep \
+        python3-vcstool \
+        ros-humble-ur \
+        ros-humble-ur-robot-driver \
+        ros-humble-ur-moveit-config \
+        ros-humble-ur-description \
+        ros-humble-controller-manager \
+        ros-humble-joint-state-publisher-gui \
+        ros-humble-joint-state-broadcaster \
+        ros-humble-joint-trajectory-controller \
+        ros-humble-position-controllers \
+        ros-humble-velocity-controllers \
+        ros-humble-rosbridge-suite \
+        ros-humble-rviz2 \
+        ros-humble-xacro \
+        ros-humble-tf2-ros \
+        ros-humble-moveit \
+        ros-humble-pilz-industrial-motion-planner \
+        libxcb-cursor0 \
+        libxkbcommon-x11-0 \
+        x11-apps \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install --no-cache-dir pymodbus==2.5.3 pyyaml
+
+# rosdep DB (ok if already initialized in the base image)
+RUN (rosdep init 2>/dev/null || true) && rosdep update
+
+# ---------- 2. Clone our repo + vcs-import vendor packages ----------
+WORKDIR ${WORKSPACE}
+RUN git clone --depth 1 --branch ${REPO_REF} ${REPO_URL} .repo && \
+    cp -r .repo/. . && \
+    rm -rf .repo/.git .repo && \
+    mkdir -p src && \
+    vcs import src < ros2.repos
+
+# ---------- 3. rosdep over the imported source tree ----------
+RUN apt-get update && \
+    rosdep install --from-paths src --ignore-src -r -y \
+        --skip-keys="moveit moveit_core moveit_ros_planning moveit_resources" \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------- 4. colcon build ----------
+# Skip the heavy MoveIt source packages — we use the apt build (ros-humble-moveit).
+# Build our config + UR description overlay + tests + onrobot1_ros.
+RUN . /opt/ros/${ROS_DISTRO}/setup.sh && \
+    colcon build --symlink-install \
+        --event-handlers console_direct+ \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release \
+        --packages-skip moveit moveit_core moveit_ros_planning moveit_resources \
+        2>&1 | tail -80
+
+# ---------- 5. Entrypoint ----------
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+EXPOSE 9090
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["bash", "-lc", "ros2 launch ur10e_rg6_moveit_config full_stack.launch.py"]

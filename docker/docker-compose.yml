@@ -7,13 +7,44 @@
 #   docker compose -f docker/docker-compose.yml up rosbridge
 
 services:
-  # Reusable build target — only used to build the image.
+  # Reusable build target — dev image (workspace mounted from host).
   ur10e_rg6:
     image: ur10e_rg6:humble
     build:
       context: ..
       dockerfile: docker/Dockerfile
     profiles: [build_only]
+
+  # Self-contained build target — clones the repo, imports vendor packages,
+  # builds everything at image-build time. ~3-4 GB final size but needs no
+  # host workspace mount. Use `docker compose build ur10e_rg6_full`.
+  ur10e_rg6_full:
+    image: ur10e_rg6:full
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.full
+    profiles: [build_only]
+
+  # Full MoveIt 2 + controllers + RViz, all-in-one self-contained image.
+  # No host workspace mount needed. Set ROBOT_IP for real hardware.
+  full_stack:
+    image: ur10e_rg6:full
+    container_name: ur10e_rg6_full
+    network_mode: host
+    ipc: host
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_X11_NO_MITSHM=1
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}
+      - XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir
+      - SKIP_BUILD=1   # build is baked into the image
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+      - /mnt/wslg:/mnt/wslg
+    command: >
+      bash -lc "ros2 launch ur10e_rg6_moveit_config full_stack.launch.py
+                use_fake_hardware:=${USE_FAKE_HARDWARE:-true}
+                robot_ip:=${ROBOT_IP:-0.0.0.0}"
 
   # 1. Just visualize the URDF in RViz (fast sanity check)
   rviz_view:

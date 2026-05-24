@@ -16,6 +16,27 @@ python3 tests/play_pickplace.py
 See `SESSION_HANDOFF.md` for the full project state, design notes, and
 real-hardware path. See `LAUNCH_RUNBOOK.md` for manual launch / debug steps.
 
+## Docker (no ROS install needed)
+
+A self-contained Docker image is provided that clones this repo, imports the
+vendor packages via [`ros2.repos`](ros2.repos), and pre-builds the workspace —
+all you need is Docker Desktop + WSL2:
+
+```bash
+# Build the self-contained image (~15-20 min, ~3 GB)
+docker compose -f docker/docker-compose.yml --profile build_only build ur10e_rg6_full
+
+# Launch the full MoveIt 2 + UR driver + RViz stack (fake hardware)
+docker compose -f docker/docker-compose.yml up full_stack
+
+# Run the pick-and-place demo against the running container
+docker exec -it ur10e_rg6_full python3 /workspace/tests/play_pickplace.py
+```
+
+See [`docker/README.md`](docker/README.md) for the full Docker workflow,
+including the dev image (workspace mounted from host) and the real-hardware
+path with `ROBOT_IP`.
+
 ## Bootstrapping vendor packages
 
 The vendor packages under `src/` (`moveit2`, `Universal_Robots_*`, `ur_msgs`,
