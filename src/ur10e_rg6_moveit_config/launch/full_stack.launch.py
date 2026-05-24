@@ -21,6 +21,7 @@ from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
     use_fake = LaunchConfiguration("use_fake_hardware")
+    robot_ip = LaunchConfiguration("robot_ip")
     pkg_share = get_package_share_directory("ur10e_rg6_moveit_config")
 
     # 1. UR control stack (controllers, RSP, etc.)
@@ -31,7 +32,10 @@ def generate_launch_description():
                 "ur10e_rg6_control.launch.py",
             ])
         ),
-        launch_arguments={"use_fake_hardware": use_fake}.items(),
+        launch_arguments={
+            "use_fake_hardware": use_fake,
+            "robot_ip": robot_ip,
+        }.items(),
     )
 
     # 2. Gripper controller spawner (waits for controller_manager via the
@@ -78,7 +82,10 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        DeclareLaunchArgument("use_fake_hardware", default_value="true"),
+        DeclareLaunchArgument("use_fake_hardware", default_value="true",
+                              description="true=mock_components; false=ur_robot_driver against real UR10e"),
+        DeclareLaunchArgument("robot_ip", default_value="127.0.0.1",
+                              description="IP of the real UR10e (ignored when use_fake_hardware:=true)"),
         ur_launch,
         spawn_gripper,
         move_group,
