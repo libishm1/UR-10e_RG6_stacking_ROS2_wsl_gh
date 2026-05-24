@@ -18,8 +18,17 @@ Added the real-hardware path end-to-end:
 - [`tests/real_hw_smoke.py`](tests/real_hw_smoke.py) — minimal arm Z up/down
   + gripper cycle around HOME at 5% speed. Joint perturbation hard-capped
   at 0.10 rad (≈ 6 cm TCP). Dry-run by default; `--yes` to execute.
+  `--no-gripper` skips gripper steps entirely (then ONLY needs
+  ur_robot_driver + any MoveIt-for-UR — no RG6 ROS boilerplate).
+  `--real-gripper` uses URScript topic, which goes through the
+  OnRobot URCap on the pendant — also needs no RG6 ROS config.
   Use this as the FIRST motion test on real hardware — arm-only first,
   then add `--real-gripper` for the URCap path.
+- [`wiki/`](wiki/) — durable findings ([index](wiki/index.md),
+  [real_hw_connection](wiki/real_hw_connection.md),
+  [path_b_vs_ros_driver](wiki/path_b_vs_ros_driver.md)).
+  Pattern borrowed from `D:\robot_ws\robots\wiki\`. Habit going
+  forward: durable research → wiki page (not chat).
 - [`src/ur10e_rg6_moveit_config/launch/full_stack.launch.py`](src/ur10e_rg6_moveit_config/launch/full_stack.launch.py)
   bug fix — `robot_ip` arg is now forwarded to the onrobot child launch
   (was silently defaulting to `127.0.0.1` for real-hardware launches).

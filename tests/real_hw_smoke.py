@@ -1,5 +1,51 @@
 """Minimal real-hardware smoke test — UR10e Z up/down around HOME + RG6 cycle.
 
+Dependency matrix — what each mode actually needs:
+
+  ----------------------+---------------------------+------------------------------
+  Mode                  | ROS-side deps             | Robot-side deps
+  ----------------------+---------------------------+------------------------------
+  --no-gripper          | ur_robot_driver +         | External Control URCap +
+                        | any MoveIt for UR         |   ext_control program loaded
+                        | (e.g. ur_moveit_config)   |
+                        |                           | (no gripper hardware needed)
+  ----------------------+---------------------------+------------------------------
+  default (sim grip)    | above + the rg6           | (only matters if you also
+                        | gripper controller        |   pull the cable on a real
+                        | (this repo's              |   gripper — sim is for the
+                        | ur10e_rg6_moveit_config)  |   ROS bench)
+  ----------------------+---------------------------+------------------------------
+  --real-gripper        | ur_robot_driver only      | External Control URCap +
+                        | (no rg6 controller, no    | OnRobot URCap on pendant
+                        | calibration yaml, no      | (interprets rg_grip via
+                        | custom URDF needed —      | tool I/O — no Compute Box)
+                        | URScript topic is built   |
+                        | into ur_robot_driver)     |
+  ----------------------+---------------------------+------------------------------
+
+Crucially: `--real-gripper` works with a stock `ur_robot_driver` +
+`ur_moveit_config` launch — no RG6 ROS config required. The gripper
+goes through `/urscript_interface/script_command` (auto-advertised by
+the driver) and is interpreted by the OnRobot URCap on the pendant.
+
+URScript-topic gotcha (per upstream
+https://docs.universal-robots.com/Universal_Robots_ROS2_Documentation/doc/ur_robot_driver/ur_robot_driver/doc/usage/script_code.html):
+publishing a WRAPPED program (`def my_prog(): ... end`) STOPS the
+External Control program — you'd need to `resend_program` or press
+Play again. This script publishes single-line `rg_grip(...)` calls
+(NOT wrapped), which the controller treats as secondary programs and
+do NOT interrupt motion. Verified in `play_pickplace.py` over many
+cycles in sim.
+
+What it does (per cycle, default 1 cycle):
+  1. movej → HOME (the verified safe joint config)
+  2. movej → HOME with shoulder_lift NUDGED MORE NEGATIVE (TCP moves UP)
+  3. grip → CLOSE_WIDTH_MM
+  4. movej → HOME
+  5. movej → HOME with shoulder_lift NUDGED LESS NEGATIVE (TCP moves DOWN)
+  6. grip → OPEN_WIDTH_MM
+  7. movej → HOME (return)
+
 What it does (per cycle, default 1 cycle):
   1. movej → HOME (the verified safe joint config)
   2. movej → HOME with shoulder_lift NUDGED MORE NEGATIVE (TCP moves UP)
@@ -12,7 +58,9 @@ What it does (per cycle, default 1 cycle):
 Why joint-space, not Cartesian: at the verified HOME the arm is in a
 clean non-singular configuration; a ±0.05 rad nudge on shoulder_lift
 produces ≈ ±3 cm TCP-Z motion with the arm staying close to HOME. No
-IK surprises, no MoveIt Cartesian planner edge cases.
+IK surprises, no MoveIt Cartesian planner edge cases. Also means the
+script makes ZERO assumptions about the URDF beyond the 6 standard UR
+joint names — works with any UR10e URDF/SRDF.
 
 SAFETY by design:
   - VEL_SCALE / ACC_SCALE = 0.05 (5% — very slow for first real-HW run)
@@ -125,14 +173,20 @@ def err_name(code):
 # ---------------- Node ----------------
 
 class RealHwSmoke(Node):
-    def __init__(self, real_gripper: bool, force_n: float, dry_run: bool):
+    def __init__(self, real_gripper: bool, force_n: float, dry_run: bool,
+                 skip_gripper: bool = False):
         super().__init__("real_hw_smoke")
         self.real_gripper = real_gripper
         self.force_n = force_n
         self.dry_run = dry_run
+        self.skip_gripper = skip_gripper
         self.mg = ActionClient(self, MoveGroup, "/move_action")
-        self.grip_pub = self.create_publisher(JointTrajectory, GRIPPER_TOPIC, 10)
-        self.urs_pub = self.create_publisher(String, URSCRIPT_TOPIC, 10)
+        # Publishers are cheap; only created so the script works against
+        # configs that DO have the RG6 topics — they're never used when
+        # skip_gripper is True.
+        if not skip_gripper:
+            self.grip_pub = self.create_publisher(JointTrajectory, GRIPPER_TOPIC, 10)
+            self.urs_pub = self.create_publisher(String, URSCRIPT_TOPIC, 10)
 
     # ----- arm -----
     def movej(self, joint_values, label):
@@ -195,6 +249,9 @@ class RealHwSmoke(Node):
 
     # ----- gripper -----
     def grip(self, width_mm: float, hold_s: float = GRIPPER_HOLD_S):
+        if getattr(self, "skip_gripper", False):
+            self.get_logger().info(f"  grip {width_mm:>5.1f} mm  [skipped: --no-gripper]")
+            return
         if self.real_gripper:
             cmd = (f"rg_grip({float(width_mm):.1f}, {float(self.force_n):.1f}, "
                    f"tool_index=0, blocking=True, depth_comp=False, popupmsg=False)\n")
@@ -228,9 +285,16 @@ def main():
     ap.add_argument("--yes", action="store_true",
                     help="Actually move. Without this, the script is a "
                          "pure dry-run (prints intent only).")
+    ap.add_argument("--no-gripper", action="store_true",
+                    help="Skip every gripper step. With this flag the script "
+                         "depends ONLY on standard MoveIt + the 6 UR joints — "
+                         "no RG6 calibration yaml, no rg6_gripper_controller, "
+                         "no URScript URCap. Works on vanilla ur_robot_driver "
+                         "+ ur_moveit_config setups.")
     ap.add_argument("--real-gripper", action="store_true",
                     help="Publish URScript rg_grip() via the OnRobot URCap "
-                         "(real hardware). Default is sim JointTrajectory.")
+                         "(real hardware). Default is sim JointTrajectory. "
+                         "Ignored if --no-gripper is set.")
     ap.add_argument("--force", type=float, default=25.0,
                     help="Grip force in N for --real-gripper mode (default 25 — "
                          "well below the 120 N max).")
@@ -278,7 +342,8 @@ def main():
 
     rclpy.init()
     n = RealHwSmoke(real_gripper=args.real_gripper,
-                    force_n=args.force, dry_run=dry_run)
+                    force_n=args.force, dry_run=dry_run,
+                    skip_gripper=args.no_gripper)
 
     try:
         # 0. Get to HOME first (slow, single big move). Skip if dry-run.
