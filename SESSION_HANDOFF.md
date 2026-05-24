@@ -3,6 +3,38 @@
 Last updated: 2026-05-23. Read this first; it covers the current state and how
 to pick up where we left off.
 
+## CHECKPOINT — 2026-05-24 (later, RViz visual cleanup)
+
+- **Dual-RViz bug fixed.** `onrobot1_ros/onrobot_description/launch/ur10e_rg6_control.launch.py`
+  now passes `launch_rviz: 'false'` to the included `ur_control.launch.py`. Previously
+  every `full_stack` launch spawned TWO RViz windows: one from the UR driver's default
+  `view_robot.rviz` and one from our `moveit_rviz.launch.py`. Verified single RViz
+  process after the fix.
+  **CAVEAT:** this edit lives in a gitignored vendor package (`src/onrobot1_ros/`).
+  If you re-run `vcs import src < ros2.repos`, the fix is wiped. TODO: lift the fix
+  into our own `full_stack.launch.py` so it survives a vendor re-import; for now
+  the change must be re-applied after every vendor refresh.
+- **Collision objects re-anchored from `world` to `base_link`.** All three
+  `co.header.frame_id = "world"` lines in `tests/play_pickplace.py` (box spawn,
+  box detach, pedestal) changed to `BASE_LINK`. This lets us rotate the URDF base
+  later WITHOUT the boxes drifting relative to the robot. Verified 10/10 pickplace
+  still works.
+- **URDF base rotation experiment.** Set `rpy="0 0 3.14159"` on the ur_robot mount,
+  rebuilt, ran pickplace 10/10 — kinematics fine. But the visual orientation STILL
+  didn't match the user's Grasshopper view. Reverted to `rpy="0 0 0"`. The visual
+  mismatch turned out to be RViz camera angle (looking from -X) vs Grasshopper
+  Perspective viewport (looking from -X-Y).
+- **RViz camera matched to Grasshopper Perspective.** `moveit.rviz` updated:
+  `Yaw=3.927` (5π/4) + `Pitch=0.6` + `Focal Point=(0.4, 0, 0.4)` + `Distance=2.5`.
+  This places the camera at roughly (-X, -Y, +Z) looking back at origin — same
+  viewpoint as Rhino's default Perspective. The robot, table, and arm pose then
+  appear the same in both visualisations.
+- **RViz ghost (`Query Goal State`) — locked decision.** Default `true` (on) for
+  manual interactive control. RViz has no runtime API to toggle from a script, so
+  the user manually unticks the checkbox in the MotionPlanning panel before long
+  scripted runs. See persistent memory `feedback_rviz_ghost_intent.md`. Don't
+  oscillate the default — it's stable as ON.
+
 ## CHECKPOINT — 2026-05-24 (real-hardware bring-up prep)
 
 Added the real-hardware path end-to-end:

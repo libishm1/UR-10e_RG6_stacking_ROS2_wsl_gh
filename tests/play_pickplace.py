@@ -476,7 +476,7 @@ class PickPlacePlayer(Node):
         (TCP pose of the pick waypoint). The box's centroid sits at (x,y,z)."""
         co = CollisionObject()
         co.id = box_id
-        co.header.frame_id = "world"
+        co.header.frame_id = BASE_LINK  # anchored to robot base so URDF base rotation moves boxes with the robot (preserves URScript-pose-to-box alignment)
         prim = SolidPrimitive()
         prim.type = SolidPrimitive.BOX
         prim.dimensions = list(BOX_SIZE_M)
@@ -554,7 +554,7 @@ class PickPlacePlayer(Node):
 
         co = CollisionObject()
         co.id = box_id
-        co.header.frame_id = "world"
+        co.header.frame_id = BASE_LINK  # anchored to robot base so URDF base rotation moves boxes with the robot (preserves URScript-pose-to-box alignment)
         prim = SolidPrimitive(); prim.type = SolidPrimitive.BOX
         prim.dimensions = list(BOX_SIZE_M)
         co.primitives.append(prim)
@@ -648,7 +648,7 @@ def main():
     pedestal_z = pedestal_top - PEDESTAL_SIZE[2] / 2.0
     co = CollisionObject()
     co.id = PEDESTAL_ID
-    co.header.frame_id = "world"
+    co.header.frame_id = BASE_LINK  # base_link anchored so URDF base rotation moves pedestal with the robot
     prim = SolidPrimitive(); prim.type = SolidPrimitive.BOX
     prim.dimensions = list(PEDESTAL_SIZE)
     co.primitives.append(prim)
