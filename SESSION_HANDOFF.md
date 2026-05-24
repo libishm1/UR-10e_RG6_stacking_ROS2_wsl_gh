@@ -255,20 +255,84 @@ wsl -d Ubuntu-22.04
 
 ---
 
-## Networking (real hardware later)
+## Networking (real hardware)
 
 `~/.wslconfig` on Windows host has `networkingMode=mirrored` enabled. This is
 the recommended way to reach a physical UR10e on the LAN from WSL2.
 After any edit to `.wslconfig`, run `wsl --shutdown` and reopen — see
 `docker/NETWORKING.md` for the full guide.
 
-When ready for real hardware:
+### Verified cell config (from `D:\robot_ws\robots\outputs\2026-05-09\SESSION_CLOSE.md`)
+
+| Item | Value |
+|---|---|
+| Laptop static IP | `192.168.1.35` |
+| UR10e cabinet IP | `192.168.1.100` |
+| Subnet | `255.255.255.0` |
+| Gateway | (empty — direct ethernet) |
+| Cabinet MAC | `00:30:D6:41:1C:13` |
+| Polyscope | `5.24.0.1219432` |
+| Robot s/n | `20255201551` |
+| URCaps | OnRobot (RG6 driver) |
+
+### SSH key (already enrolled on the pendant)
+
+The private/public pair lives at `D:\robot_ws\robots\outputs\2026-05-09\ssh_setup\`:
+- Private: `robots_workspace_key` (keep on laptop, never share)
+- Public: `robots_workspace_key.pub` (already installed on pendant as `robots-workspace-2026-05-10`)
+
+Reuse this key — do not generate a new one. Pendant import is documented in
+`D:\robot_ws\robots\outputs\2026-05-09\ssh_setup\usb_payload\README_USB_IMPORT.txt`.
+
+SSH user is `root`. Quick smoke test from WSL once mirrored networking is up:
+```bash
+KEY="/mnt/d/robot_ws/robots/outputs/2026-05-09/ssh_setup/robots_workspace_key"
+chmod 600 "$KEY"
+ssh -i "$KEY" -o StrictHostKeyChecking=accept-new root@192.168.1.100 'ls /programs'
+```
+
+### Pendant-side prerequisites (must do once on the UR)
+
+1. Settings → Security → **enable all 5 services** (29999 / 30001 / 30002 /
+   30003 / 30004) — they ship DISABLED. Without this, ALL TCP ports
+   timeout and the ROS 2 driver can't connect.
+2. Settings → Security → General → change "Disable inbound access to
+   additional interfaces (by port)" from `1-65535` to `1-21,23-65535`
+   (excludes port 22 so SSH works).
+3. Settings → Security → Secure Shell → enable, authentication "Both".
+4. Top-right toggle: **Remote Control mode**.
+5. Install the **External Control URCap** and create a program that
+   contains a single `external_control` node configured for Host IP =
+   `192.168.1.35` (laptop), Port `50002`.
+
+### Launch with real hardware
+
 ```bash
 ros2 launch ur10e_rg6_moveit_config full_stack.launch.py \
-    use_fake_hardware:=false  # plus robot_ip arg in onrobot launch
+    use_fake_hardware:=false \
+    robot_ip:=192.168.1.100
 ```
-Start with velocity scaling 0.10, hand on E-stop, no people in the work
-envelope.
+
+Wait ~20 s for everything to come up, then **press Play on the pendant**
+on the External Control program. The terminal logs
+`Robot connected to reverse interface` when handshake completes.
+
+OnRobot URCap cold-boot quirk: first Play after a cold cabinet boot
+triggers "RG grip didn't initialize" and the cabinet shuts down. Restart
+the cabinet, then Play again — second attempt picks up the URCap. This
+is REPEATABLE.
+
+Start with `play_pickplace.py --real-gripper --force 25 --max 1`, hand on
+E-stop, no people in the work envelope.
+
+### Path B fallback (URScript deploy via SFTP + Dashboard)
+
+If ROS 2 streaming isn't right for a particular task (e.g. need to run an
+operator-authored .urp that uses URCap functions), the reference workflow
+is at `D:\robot_ws\robots\outputs\2026-05-10\path_b\urp_deploy.py`. It
+takes a URScript body, splices it into a template .urp's `<cachedContents>`,
+retargets the `<file>` ref, uploads via SFTP, and dashboard-loads+plays.
+Verified V3 on 2026-05-10.
 
 ---
 
