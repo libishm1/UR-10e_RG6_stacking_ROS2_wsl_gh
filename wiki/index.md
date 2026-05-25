@@ -24,6 +24,10 @@ let it die in a chat transcript.
   across sessions. Currently: **RG6 control = Mechanism C** (URScript topic).
 - [Launch files](launch_files.md) — inventory of every `.launch.py` in the
   workspace, their args, what they bring up, when to use which.
+- [Real-hardware validation plan](real_hw_validation_plan.md) — 9-phase
+  step-by-step checklist with pass/abort criteria, validation log
+  template, and rollback procedure. Run end-to-end at the cell with
+  a hand on the E-stop.
 - [RViz GPU rendering under WSL2](rviz_gpu_rendering.md) — verified
   D3D12 passthrough via WSLg to Intel UHD 630. How to confirm,
   what to do if you ever see `llvmpipe` fallback.

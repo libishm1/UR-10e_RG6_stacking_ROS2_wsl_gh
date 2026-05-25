@@ -3,6 +3,53 @@
 Last updated: 2026-05-23. Read this first; it covers the current state and how
 to pick up where we left off.
 
+## CHECKPOINT — 2026-05-25 (real-hardware validation prep)
+
+**Status:** sim baseline locked. All artifacts needed to walk the cell
+up to verified pick-place on real hardware are now in place. The next
+session at the cell uses the validation plan below — no more sim
+experiments needed.
+
+**New artifact:** [`wiki/real_hw_validation_plan.md`](wiki/real_hw_validation_plan.md) —
+**9-phase step-by-step checklist** with pass/abort criteria at each
+step and a fill-in validation log at the bottom. Designed so one
+operator at the cell can run it end-to-end with a hand on the E-stop.
+Phase summary:
+
+- Phase 0 — Pre-flight (off-robot, WSL + Windows firewall sanity)
+- Phase 1 — Pendant prereqs (URCap installs + Remote Control + Network)
+- Phase 2 — Network reachability (ping + TCP probes + Dashboard handshake)
+- Phase 3 — Driver bring-up (External Control handshake, NO motion)
+- Phase 4 — Read-only kinematic verification (`measure_real_robot_pose.py`)
+- Phase 5 — Arm-only smoke (`real_hw_smoke.py --yes --no-gripper`, ±3 cm @ 5%)
+- Phase 6 — Gripper-only smoke (URCap path via `gripper_test.py --real`)
+- Phase 7 — Combined arm + gripper smoke (`real_hw_smoke.py --yes --real-gripper`)
+- Phase 8 — Single pick-place cycle (`play_pickplace.py --real-gripper --max 1 --force 25`)
+- Phase 9 — Full 10-cycle program (`--force 40`, normal speed)
+
+**Hard rule:** don't advance past any failing phase. Diagnose first.
+Rollback procedure is in the plan.
+
+**Open visual-orientation question** — STILL UNRESOLVED, but no longer
+a blocker: the validation plan's Phase 4.3 will measure the actual
+yaw mismatch between URDF mount and real cabinet (visual observation
++ optional `rpy` correction). Once we have that one number, we set it
+in the URDF and the question is closed.
+
+**Files supporting the plan:**
+- `tests/check_real_hw_network.sh` — Phase 2 automation
+- `tests/measure_real_robot_pose.py` — Phase 4 automation (read-only)
+- `tests/real_hw_smoke.py` — Phases 5 + 7 automation (slow, hard-capped)
+- `tests/gripper_test.py` — Phase 6 automation
+- `tests/play_pickplace.py` — Phases 8 + 9 automation
+
+**Memory entries supporting the plan:**
+- [[reference-ur10e-cell-network]] — verified IPs + SSH key paths
+- [[reference-path-b-deploy]] — fallback URScript deploy if ROS path fails
+- [[feedback-motion-speeds]] — always default to slow
+- [[feedback-rviz-ghost-intent]] — ghost on for manual, untick for scripts
+- [[feedback-wiki-habit]] — promote durable findings to wiki
+
 ## CHECKPOINT — 2026-05-24 (visual orientation experiments — REVERTED to defaults)
 
 **Status:** Visual orientation mismatch between ROS RViz and the real cell
