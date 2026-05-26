@@ -72,11 +72,42 @@ Possible explanations (uninvestigated):
 We didn't dig further because flipping the sign in our scripts is a
 practical fix that unblocks visualization.
 
-## ⚠ UNVERIFIED ON REAL HARDWARE — VERIFICATION REQUIRED
+## ✅ VERIFIED ON REAL HARDWARE — 2026-05-26
 
-**Status as of 2026-05-26:** the sign-flip fix is verified only in
-SIMULATION (`use_fake_hardware:=true`). It has NOT been tested on the
-real cabinet yet.
+**Status:** the URDF-vs-cabinet sign mismatch is now CONFIRMED with
+ur_rtde readback from the physical robot at its HOME.
+
+### Verification result
+
+Real cabinet manually moved to its operator-known HOME via the
+pendant. `tests/measure_real_robot_pose.py` reports:
+
+```
+Joint angles (rad)        |  ROS HOME (rad)         |  Δ (deg)
+--------------------------+-------------------------+---------
+shoulder_pan    +1.5708   |   +1.5708              |    -0.00
+shoulder_lift   -1.5708   |   -1.5708              |    +0.00
+elbow           -1.5708   |   -1.5708              |    +0.00
+wrist_1         -1.5708   |   -1.5708              |    +0.00
+wrist_2         +1.5708   |   +1.5708              |    -0.00
+wrist_3         +1.5708   |   +1.5708              |    -0.00
+```
+
+Real cabinet at physical HOME → `shoulder_pan = +π/2`.
+Our SIM scripts at the same visual pose → `shoulder_pan = −π/2`.
+**Δ = 180° on shoulder_pan, 0 on all others. Verified.**
+
+### What this means
+
+- Sim with `shoulder_pan = −π/2` produces the same physical-looking
+  pose as real cabinet with `shoulder_pan = +π/2`
+- Both produce TCP in roughly the same world position (over the table)
+- The URDF's `shoulder_pan_joint` axis convention is sign-inverted
+  from the real cabinet's controller
+- This is a hardware/firmware-specific quirk of this cell (or a
+  bug in upstream `ur_description` for this UR10e variant)
+
+
 
 ### What we believe (and need to confirm)
 

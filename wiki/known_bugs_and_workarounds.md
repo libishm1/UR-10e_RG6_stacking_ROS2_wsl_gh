@@ -18,20 +18,23 @@ sessions: search this first before re-discovering anything.
 
 ---
 
-## Shoulder-pan sign mismatch (URDF vs cabinet) — **UNVERIFIED ON REAL HW**
+## Shoulder-pan sign mismatch (URDF vs cabinet) — **VERIFIED 2026-05-26**
 
-**2026-05-26 (sim-verified only).** Our URDF's `shoulder_pan_joint`
-rotates the arm in the **opposite physical direction** from this
-cabinet's controller at the same numerical joint value. At joints
-`[1.5708, -1.5708, -1.5708, -1.5708, 1.5708, 1.5708]`: real arm → over
-the table; URDF sim → away from the table.
+**2026-05-26 — sim-verified AND real-hardware verified.** Our URDF's
+`shoulder_pan_joint` axis is sign-inverted from this cabinet's
+controller. Same physical pose corresponds to opposite numerical
+shoulder_pan values.
 
-**⚠ DO NOT trust this finding on real hardware until verified.** The
-sign-flip fix is currently locked in our scripts based on visual
-comparison only. Verification plan + safety procedure in
+Verification (ur_rtde readback with real robot at physical HOME):
+- Real cabinet HOME: `shoulder_pan = +π/2` (+1.5708 rad)
+- Our sim HOME_Q for same visual pose: `shoulder_pan = −π/2` (−1.5708 rad)
+- Δ = 180°, all other joints identical
+
+**Deployment caveat for real hardware:** scripts use `-π/2` for sim
+visualization. Real cabinet at `-π/2` would rotate arm to the
+OPPOSITE side from work area. Use one of three strategies in
 [`shoulder_pan_sign_mismatch.md`](shoulder_pan_sign_mismatch.md)
-"UNVERIFIED ON REAL HARDWARE" section. Run those checks BEFORE any
-real-hardware motion command via our scripts.
+"Critical caveat" section before commanding real motion.
 
 **Workaround (sim-only):** flip the sign on `shoulder_pan_joint` in HOME:
 ```python

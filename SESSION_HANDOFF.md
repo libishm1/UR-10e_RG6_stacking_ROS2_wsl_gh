@@ -9,13 +9,18 @@ to pick up where we left off.
 turned out to be a **shoulder_pan sign mismatch** between URDF and real
 cabinet: same joint value produces opposite physical direction.
 
-> **⚠ UNVERIFIED ON REAL HARDWARE.** The fix is locked in sim only. The
-> hypothesis (URDF vs cabinet axis convention is opposite) has NOT been
-> tested on real hardware yet. Before any real-hw motion via our
-> scripts, run the verification plan in
-> [`wiki/shoulder_pan_sign_mismatch.md`](wiki/shoulder_pan_sign_mismatch.md)
-> § "UNVERIFIED ON REAL HARDWARE". Sending our `-pi/2` HOME_Q to the
-> real cabinet could move the arm to the WRONG side at startup.
+> **✅ VERIFIED ON REAL HARDWARE 2026-05-26 late-afternoon.**
+> ur_rtde readback with real robot at physical HOME confirms cabinet
+> uses `shoulder_pan = +π/2` while our sim uses `−π/2` for the same
+> visual pose. **Δ = 180° on shoulder_pan, 0 on all other joints.**
+> The URDF axis convention is sign-inverted from this cabinet.
+>
+> **Deployment caveat:** scripts use `-π/2` for sim correctness.
+> Sending `-π/2` to the real cabinet → arm rotates to wrong side.
+> Use one of three deployment strategies (re-teach cabinet HOME,
+> sign-flip at driver boundary, or fix URDF axis) before Phase 5+
+> real-hw motion. Details in
+> [`wiki/shoulder_pan_sign_mismatch.md`](wiki/shoulder_pan_sign_mismatch.md).
 
 ### The fix
 
