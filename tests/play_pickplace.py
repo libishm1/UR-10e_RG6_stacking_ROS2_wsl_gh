@@ -205,15 +205,23 @@ WAYPOINTS = {
     79: (0.648700, -0.398470,  0.219490,  2.989370,  0.966050, -0.000000),
     80: (0.594960, -0.020540,  0.499130,  2.221440,  2.221440, -0.000000),
 }
-HOME_Q = [-1.5708, -1.5708, -1.5708, -1.5708, 1.5708, 1.5708]
-# Note 2026-05-26: shoulder_pan = -pi/2 (not +pi/2) for SIM ONLY. The URDF
-# and the real cabinet's controller use OPPOSITE shoulder_pan axis
-# conventions — at the same numerical joint value, our URDF rotates the arm
-# in the opposite physical direction. We discovered this when sim arm
-# extended to one side of the table while the real arm at the same joint
-# value goes to the other side. Flipping the sign in our scripts makes the
-# URDF visualization match the real cell. For real hardware: revert to
-# +pi/2 OR re-teach the cabinet's home to -pi/2 before deployment.
+# DRY RUN CLEARANCE — bumps every WAYPOINT Z by this offset for in-air rehearsal.
+# Set to 0.0 for normal pick+place contact with the table. Set to ~0.10 m to
+# fly through the entire program 10 cm above the contact heights so nothing
+# is physically picked or placed — useful for verifying motion + orientation
+# end-to-end on real hardware before trusting the contact poses.
+DRY_RUN_CLEARANCE_M = 0.10
+if DRY_RUN_CLEARANCE_M > 0.0:
+    WAYPOINTS = {
+        wp_id: (x, y, z + DRY_RUN_CLEARANCE_M, rx, ry, rz)
+        for wp_id, (x, y, z, rx, ry, rz) in WAYPOINTS.items()
+    }
+
+HOME_Q = [1.5708, -1.5708, -1.5708, -1.5708, 1.5708, 1.5708]
+# 2026-05-26 (later): shoulder_pan back to +pi/2 (was -pi/2) after fixing
+# the ur_macro.xacro shoulder_pan_joint axis from "0 0 1" to "0 0 -1".
+# URDF visualization and real cabinet now agree on this HOME — no sign-flip
+# helper needed. See wiki/shoulder_pan_sign_mismatch.md.
 
 
 # ---------------- Program steps ----------------

@@ -6,6 +6,11 @@ sessions: search this first before re-discovering anything.
 
 ## Quick index
 
+- [Pendant vs RTDE 400 mm Z gap on this cabinet (cosmetic)](#pendant-vs-rtde-400-mm-z-gap-on-this-cabinet-cosmetic)
+- [Combined URDF must forward `script_filename` & friends for real hardware](#combined-urdf-must-forward-script_filename--friends-for-real-hardware)
+- [`onrobot_interface` C++ plugin crashes on init — never use it](#onrobot_interface-c-plugin-crashes-on-init--never-use-it)
+- [RTDE "Pipeline producer overflowed" spam on WSL2](#rtde-pipeline-producer-overflowed-spam-on-wsl2)
+- [`ros2 topic` CLI hangs in WSL2; rclpy direct subscriber works](#ros2-topic-cli-hangs-in-wsl2-rclpy-direct-subscriber-works)
 - [Shoulder-pan sign mismatch (URDF vs cabinet)](#shoulder-pan-sign-mismatch-urdf-vs-cabinet)
 - [Bare URScript on port 30002 + URCap functions crashes URCap](#bare-urscript-on-port-30002--urcap-functions-crashes-urcap)
 - [WSLg "pink window" after many launch cycles](#wslg-pink-window-after-many-launch-cycles)
@@ -15,6 +20,179 @@ sessions: search this first before re-discovering anything.
 - [OnRobot URCap cold-boot quirk](#onrobot-urcap-cold-boot-quirk)
 - [pickplace LIN→PTP retry CONTROL_FAILED noise](#pickplace-linptp-retry-control_failed-noise)
 - [Calibration extraction doesn't fix the 1m+ TCP-Z mismatch](#calibration-extraction-doesnt-fix-the-1m-tcp-z-mismatch)
+
+---
+
+## Pendant vs RTDE 400 mm Z gap on this cabinet (cosmetic)
+
+**2026-05-11 (D:\robot_ws), confirmed still present 2026-05-26.** On this
+exact cabinet (PolyScope 5.24.0.1219432, S/N 20255201551, OnRobot Quick
+Changer + RG6 + current fingers), the **pendant Move screen** and **RTDE
+`actual_TCP_pose`** disagree on the Z component of the same TCP by exactly
+~400 mm. X and Y agree to <0.05 mm. Magnitude is close to the QC+RG6+finger
+stack length.
+
+Documented in detail in `/mnt/d/robot_ws/robots/wiki/ur10e_rg6/tcp_calibration.md`
+with 4 tested hypotheses (all rejected) and 4 open diagnostic paths (`get_actual_tcp_pose()`
+via URScript, pendant Feature dropdown, etc.).
+
+**Why it doesn't affect ROS 2 motion correctness:** our planning chain is
+`URDF tool0 → URDF FK → RTDE TCP → cabinet motion`. The pendant display is
+never read by ROS. The URDF FK ↔ RTDE TCP agreement is verified at 0.4 mm
+(see `wiki/shoulder_pan_sign_mismatch.md` post-fix verification). The
+400 mm pendant gap only matters for tools that read pendant values OR do
+their own Rhino-world conversion (Grasshopper's `Plane from UR TCP Pose`
+component handled this by injecting `z_offset_mm = -5.605176` which
+composites the +394.4 mm Rhino-world offset with the -400 mm gap).
+
+**Workaround for ROS 2:** none needed. Just don't trust the pendant Move
+screen's Z for absolute positions on this cabinet — use RTDE or our URDF
+FK instead.
+
+---
+
+## Combined URDF must forward `script_filename` & friends for real hardware
+
+**2026-05-26.** First `use_fake_hardware:=false` launch after locking the
+URDF crashed `ur_ros2_control_node` with:
+```
+[UR_Client_Library:]: Opening file 'to_be_filled_by_ur_robot_driver' failed
+[resource_manager]: Failed to 'configure' hardware 'ur10e'
+... terminate called after throwing 'std::runtime_error'
+```
+Driver exits with SIGABRT (-6). Cascade: every controller spawner fails
+because the controller_manager is dead.
+
+**Root cause.** `ur_macro.xacro` declares default-placeholder values for:
+- `script_filename:=to_be_filled_by_ur_robot_driver`
+- `output_recipe_filename:=to_be_filled_by_ur_robot_driver`
+- `input_recipe_filename:=to_be_filled_by_ur_robot_driver`
+
+Upstream `ur_robot_driver/launch/ur_control.launch.py` passes the real paths
+as xacro CLI args when building the URDF. **But** if your top-level xacro
+(here `ur10e_rg6.urdf.xacro`) doesn't declare those names as `<xacro:arg>`,
+xacro silently drops the CLI args, and the placeholder defaults reach
+`URPositionHardwareInterface::on_configure` which tries to open them as
+file paths.
+
+**Workaround.** Declare and forward the args in your top-level URDF. The
+fix applied to `ur10e_rg6.urdf.xacro`:
+1. Add `<xacro:arg name="script_filename" default=""/>` (and equivalents
+   for `output_recipe_filename`, `input_recipe_filename`, `reverse_ip`,
+   `reverse_port`, `script_sender_port`, `trajectory_port`,
+   `script_command_port`, `headless_mode`, `non_blocking_read`,
+   `keep_alive_count`).
+2. Pass each `script_filename="$(arg script_filename)"` etc. inside the
+   `<xacro:ur_robot ...>` invocation, alongside the args already there.
+
+Crib from upstream `ur.urdf.xacro` — it's the canonical list.
+
+**Symptom check.** When debugging, `grep to_be_filled /tmp/full_stack.log`
+catches this fast.
+
+---
+
+## `onrobot_interface` C++ plugin crashes on init — never use it
+
+**2026-05-26.** Setting the ros2_control block for `OnRobotRG6System` to
+`<plugin>onrobot_interface/OnRobotHardwareInterface</plugin>` (the C++
+plugin shipped with `onrobot1_ros/onrobot_interface`) crashes
+`ur_ros2_control_node` at startup with the French-locale error:
+```
+[OnRobotHardwareInterface]: Un seul joint doit être défini. Trouvé : 0
+[resource_manager]: Failed to initialize hardware 'OnRobotRG6System'
+terminate called: 'Wrong state or command interface configuration.'
+missing state interfaces: ' rg6_joint/position '
+missing command interfaces: ' rg6_joint/position '
+```
+
+The plugin requires `prefix` and `model` `<param>` entries inside the
+`<hardware>` block that our URDF doesn't pass, then it reads 0 joints,
+then aborts.
+
+**Workaround (LOCKED).** Always use `<plugin>mock_components/GenericSystem</plugin>`
+for the `OnRobotRG6System` `ros2_control` block — both on fake and real
+hardware. The RG6 joint exists for state mirroring / robot_state_publisher
+only; the real gripper is commanded outside ros2_control (via Mechanism C
+URScript topic, or skipped entirely with `--no-gripper`).
+
+This aligns with the LOCKED DECISION in `wiki/decisions.md` 2026-05-24.
+
+---
+
+## RTDE "Pipeline producer overflowed" spam on WSL2
+
+**2026-05-26.** When `ur_ros2_control_node` connects to the real cabinet
+from WSL2, the log floods with:
+```
+[UR_Client_Library:]: Pipeline producer overflowed! <RTDE Data Pipeline>
+```
+hundreds of times in the first seconds, sometimes ongoing.
+
+**Why.** The driver subscribes to RTDE at 500 Hz. WSL2 is not a real-time
+kernel — the FIFO scheduling warning ("Your system/user seems not to be
+setup for FIFO scheduling") is the symptom. Under load (or just slow
+context-switch on WSL2's vEthernet), the consumer thread can't drain
+the RTDE buffer fast enough, and packets overflow.
+
+**Impact.** Commanded motion may lag or jitter. State readback (`/joint_states`)
+still works because the broadcaster publishes at controller-manager rate,
+not RTDE rate — so the snapshot is fresh.
+
+**Workarounds.**
+
+**1. Lower controller_manager update_rate (PARTIALLY WORKS, applied).**
+Edit `src/Universal_Robots_ROS2_Driver/ur_robot_driver/config/ur10e_update_rate.yaml`
+from `update_rate: 500` to `update_rate: 250`. This does NOT change the
+cabinet's RTDE publish rate (log still reports "Setting up RTDE communication
+with frequency 500.000000") — that's hardcoded in the upstream driver.
+BUT combined with `non_blocking_read=true` (set in `ur_macro.xacro`), the
+driver drops rather than buffers, and the steady-state overflow rate
+settles to **~8/sec measured 2026-05-26** (well below the worst-case
+~250/sec). At 8/sec we're dropping ~1.6% of RTDE samples, keeping 98.4%.
+Acceptable for tiny smoke tests with slow motion. `/joint_states` still
+publishes cleanly.
+
+**2. (Untried) Modify driver to plumb cabinet RTDE rate through a
+parameter.** Upstream newer versions have `rtde_frequency` xacro arg /
+hardware param. Our Humble version doesn't — would need a patch to
+`hardware_interface.cpp` `URPositionHardwareInterface::on_configure()`
+to set `driver_config.rtde_target_frequency` (need to verify the field
+name in the installed `ur_client_library` header).
+
+**3. (Untried) Pin the ROS process to dedicated CPU cores via `taskset` /
+`chrt -f`. May need `cap_sys_nice` for the user.
+
+**4. (Untried) Run the driver in a separate native Linux box (no WSL).
+The "proper" answer for sustained streaming.
+
+Decision for now: accept the ~8/sec noise for slow / small-motion smoke
+tests. Revisit before sustained pickplace streaming on real hardware.
+
+---
+
+## `ros2 topic` CLI hangs in WSL2; rclpy direct subscriber works
+
+**2026-05-26.** With the driver fully up and `joint_state_broadcaster`
+publishing, `ros2 topic list` and `ros2 topic echo /joint_states --once`
+hang indefinitely from a separate bash session, even with the same
+`ROS_DOMAIN_ID`, RMW, and no `ROS_LOCALHOST_ONLY`. `ros2 daemon stop`
+doesn't help.
+
+**Workaround.** Use a direct rclpy subscriber. Saved at
+`/tmp/peek_joint_states.py` for quick re-use:
+```python
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import JointState
+# create_subscription("/joint_states", ...) then spin_once with timeout
+```
+This sees the topic and prints messages within ~1 s of launch.
+
+**Suspected cause.** WSL2 mirrored-networking + FastDDS multicast
+discovery races. The CLI's discovery probe uses a short timeout that
+loses to the kernel re-routing latency. rclpy's `spin_once` keeps
+re-running discovery so it eventually wins.
 
 ---
 

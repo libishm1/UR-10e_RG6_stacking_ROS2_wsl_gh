@@ -6,6 +6,22 @@
   <xacro:arg name="fake_sensor_commands" default="false"/>
   <xacro:arg name="robot_ip"             default="0.0.0.0"/>
 
+  <!-- Real-hardware args forwarded from ur_control.launch.py. Without these
+       declared at the top level, xacro silently drops them and ur_macro's
+       defaults ('to_be_filled_by_ur_robot_driver') reach the C++ driver,
+       which aborts on file open (2026-05-26 incident, wiki/known_bugs). -->
+  <xacro:arg name="headless_mode"          default="false"/>
+  <xacro:arg name="script_filename"        default=""/>
+  <xacro:arg name="output_recipe_filename" default=""/>
+  <xacro:arg name="input_recipe_filename"  default=""/>
+  <xacro:arg name="reverse_ip"             default="0.0.0.0"/>
+  <xacro:arg name="reverse_port"           default="50001"/>
+  <xacro:arg name="script_sender_port"     default="50002"/>
+  <xacro:arg name="trajectory_port"        default="50003"/>
+  <xacro:arg name="script_command_port"    default="50004"/>
+  <xacro:arg name="non_blocking_read"      default="true"/>
+  <xacro:arg name="keep_alive_count"       default="2"/>
+
   <!-- ====================================================== -->
   <!-- Include UR10e macros and ROS2 control                  -->
   <!-- ====================================================== -->
@@ -66,6 +82,17 @@
       use_fake_hardware="$(arg use_fake_hardware)"
       fake_sensor_commands="$(arg fake_sensor_commands)"
       robot_ip="$(arg robot_ip)"
+      headless_mode="$(arg headless_mode)"
+      script_filename="$(arg script_filename)"
+      output_recipe_filename="$(arg output_recipe_filename)"
+      input_recipe_filename="$(arg input_recipe_filename)"
+      reverse_ip="$(arg reverse_ip)"
+      reverse_port="$(arg reverse_port)"
+      script_sender_port="$(arg script_sender_port)"
+      trajectory_port="$(arg trajectory_port)"
+      script_command_port="$(arg script_command_port)"
+      non_blocking_read="$(arg non_blocking_read)"
+      keep_alive_count="$(arg keep_alive_count)"
       generate_ros2_control_tag="true">
     <origin xyz="0 0 0" rpy="0 0 0"/>
   </xacro:ur_robot>
@@ -125,7 +152,12 @@
     <origin xyz="0 0 0.051" rpy="0 0 0"/>
   </joint>
 
-  <!-- 3. Grasp frame (TCP) — 190 mm down the gripper Z axis -->
+  <!-- 3. Grasp frame (TCP) — 228 mm down the gripper Z axis.
+       Calibrated 2026-05-26 against the real cabinet's set_tcp() offset:
+       at HOME the cabinet's RTDE-reported TCP Z (0.400 m) is 0.279 m below
+       URDF tool0 Z (0.679 m). Our chain has bracket(0) + body(0.051) +
+       grasp(?) = total 0.279 → grasp = 0.228 m. Previous value 0.190 m
+       under-estimated the gripper length by 38 mm. -->
   <link name="rg6_tcp">
     <visual>
       <geometry><sphere radius="0.002"/></geometry>
@@ -136,7 +168,7 @@
   <joint name="rg6_grasp_frame_joint" type="fixed">
     <parent link="rg6_body"/>
     <child link="rg6_tcp"/>
-    <origin xyz="0 0 0.19" rpy="0 0 0"/>
+    <origin xyz="0 0 0.228" rpy="0 0 0"/>
   </joint>
 
   <!-- 4. ee_link alias for MoveIt -->
@@ -269,13 +301,14 @@
   <!-- are derived from it inside robot_state_publisher.      -->
   <!-- ====================================================== -->
   <ros2_control name="OnRobotRG6System" type="system">
+    <!-- LOCKED DECISION (wiki/decisions.md 2026-05-24): RG6 control on real
+         hardware uses Mechanism C (URScript topic via /urscript_interface/
+         script_command), NOT the onrobot_interface C++ plugin. The plugin
+         requires prefix/model params we don't pass and crashes on init.
+         Always use mock_components so the joint exists for state mirroring;
+         the real gripper is commanded outside ros2_control entirely. -->
     <hardware>
-      <xacro:if value="$(arg use_fake_hardware)">
-        <plugin>mock_components/GenericSystem</plugin>
-      </xacro:if>
-      <xacro:unless value="$(arg use_fake_hardware)">
-        <plugin>onrobot_interface::OnRobotHardwareInterface</plugin>
-      </xacro:unless>
+      <plugin>mock_components/GenericSystem</plugin>
     </hardware>
     <joint name="rg6_joint">
       <command_interface name="position"/>

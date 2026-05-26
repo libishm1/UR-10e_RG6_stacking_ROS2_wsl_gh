@@ -13,7 +13,19 @@ src/Universal_Robots_ROS2_Description/*
 !src/Universal_Robots_ROS2_Description/urdf/
 src/Universal_Robots_ROS2_Description/urdf/*
 !src/Universal_Robots_ROS2_Description/urdf/ur10e_rg6.urdf.xacro
-src/Universal_Robots_ROS2_Driver/
+# 2026-05-26 — our kinematic fix lives in ur_macro.xacro (vendor file).
+# Track it so a future `vcs import --force` doesn't wipe the fix silently.
+!src/Universal_Robots_ROS2_Description/urdf/ur_macro.xacro
+# 2026-05-26 — our RTDE rate fix (500 → 250 Hz for WSL2) lives in
+# this single yaml inside the otherwise-vendor-ignored driver tree.
+# Structure mirrors the Description block above: ignore the dir's contents,
+# whitelist the path to the one file we patched.
+src/Universal_Robots_ROS2_Driver/*
+!src/Universal_Robots_ROS2_Driver/ur_robot_driver/
+src/Universal_Robots_ROS2_Driver/ur_robot_driver/*
+!src/Universal_Robots_ROS2_Driver/ur_robot_driver/config/
+src/Universal_Robots_ROS2_Driver/ur_robot_driver/config/*
+!src/Universal_Robots_ROS2_Driver/ur_robot_driver/config/ur10e_update_rate.yaml
 src/moveit2/
 src/moveit_resources/
 src/onrobot1_ros/

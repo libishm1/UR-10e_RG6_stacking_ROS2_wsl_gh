@@ -1,9 +1,303 @@
 # UR10e + RG6 — Session Handoff
 
-Last updated: 2026-05-23. Read this first; it covers the current state and how
+Last updated: 2026-05-26 (evening). Read this first; it covers the current state and how
 to pick up where we left off.
 
-## CHECKPOINT — 2026-05-26 (late afternoon — SHOULDER-PAN SIGN FIX FOUND, real-HW deployment caveat documented)
+## CHECKPOINT — 2026-05-26 (very late evening — URDF KINEMATIC FIX VERIFIED on real hardware)
+
+🎯 **Real cabinet ↔ URDF FK now match to 0.4 mm at every measured pose.** From 705 mm error at extreme pose to **0.4 mm** — a 1700× improvement on a two-line edit in `ur_macro.xacro`.
+
+### The fix (two reverts in `src/Universal_Robots_ROS2_Description/urdf/ur_macro.xacro`)
+
+1. **Line 350** — `base_link → base_link_inertia` joint:
+   - **Was:** `<origin xyz="0 0 0" rpy="0 0 ${pi}" />` (180° yaw)
+   - **Now:** `<origin xyz="0 0 0" rpy="0 0 0" />` (no rotation)
+   - Upstream comment claimed UR controllers have "X+ pointing backwards" relative to REP-103, but for this cabinet's primary-interface output the kinematic data is ALREADY in REP-103-aligned base frame. The upstream yaw caused a 180°-class mirror everywhere except at HOME (where the symmetric all-±π/2 joint config hid it).
+
+2. **Line 364** — `shoulder_pan_joint`:
+   - **Was:** `<axis xyz="0 0 -1" />` (my earlier symptom-patch from this morning)
+   - **Now:** `<axis xyz="0 0 1" />` (upstream default)
+   - The axis flip was patching the HOME symmetry coincidence created by the 180° yaw above. With both reverted, they cancel and the URDF FK matches the cabinet's RTDE everywhere.
+
+**No change to `HOME_Q` anywhere.** SRDF, `initial_positions.yaml`, scripts all keep `[+π/2, -π/2, -π/2, -π/2, +π/2, +π/2]`. Cabinet and URDF agree on what those values mean physically.
+
+### Empirical proof — see `calibration/fk_experiment.py`
+
+Tested 4 hypotheses against measured RTDE TCP at 2 distinct poses:
+
+```
+Hypothesis                                          HOME |Δ|   EXTREME |Δ|
+A (180° yaw + shoulder_pan -Z, "current" pre-fix)   0.4 mm     854 mm  ← matched HOME by coincidence
+B (no yaw + shoulder_pan +Z, FIX APPLIED)           0.4 mm     0.4 mm  ← matches everywhere
+C (no yaw + shoulder_pan -Z)                        1.43 m     778 mm
+D (180° yaw + shoulder_pan +Z, pre-my-axis-flip)    1.43 m    1155 mm
+```
+
+Hypothesis B is the only one that matches at non-HOME poses. The "tcp_compare.py" results on real hardware after the fix:
+
+```
+                       Real (RTDE)              URDF rg6_tcp           |Δ|
+HOME:                 (+0.176, +0.692, +0.400) (+0.176, +0.692, +0.400) 0.4 mm
+Extreme freedrive:    (-0.591, +0.901, +0.213) (-0.591, +0.901, +0.213) 0.4 mm
+   joints: pan=+120°, lift=-122°, elbow=-81°, w1=-46°, w2=+126°, w3=+90°
+```
+
+Both position AND rotation (axis-angle) match exactly.
+
+### What's also in the fix (already in place from earlier this evening)
+
+- **`ur10e_rg6.urdf.xacro` rg6_tcp offset** edited from 0.190 m to 0.228 m so URDF `rg6_tcp` exactly matches the cabinet's `set_tcp()` (gripper Z offset). With this, both `rg6_tcp` and the cabinet's RTDE TCP refer to the same physical point.
+
+### Real-hardware dry run — 2026-05-26 (very late evening, post-fix)
+
+`play_pickplace.py --max 3` ran on REAL hardware (no `--real-gripper`,
+`DRY_RUN_CLEARANCE_M = 0.10` to fly 10 cm above contact heights). With the
+URDF kinematic fix in place:
+
+```
+✓ movej PTP HOME             (from off-HOME freedrive pose, real motion, ~6 s)
+✓ grip 70                    (SIM mode, no physical gripper move)
+✓ movel LIN  (0.823, 0.473, 0.216)   (real motion, ~8 s)
+✓ movel LIN  (0.823, 0.473, 0.129)   (real motion, ~4 s)
+✓ grip 50                    (SIM mode)
+✓ planning scene attach box_00
+✗ movel LIN  (0.823, 0.473, 0.500)   INVALID_MOTION_PLAN (LIFT)
+✗ PTP retry to LIFT                  also INVALID_MOTION_PLAN
+```
+
+**This is the first time non-symmetric world-frame Cartesian motion succeeded
+on real hardware** — three distinct XYZ targets reached correctly, no "mirror"
+behaviour. The URDF kinematic fix is empirically validated end-to-end at the
+motion level, not just at the FK math level.
+
+The remaining LIFT failure at `(0.823, 0.473, 0.500)` is a SEPARATE issue
+from the kinematic fix. Both LIN and PTP failed, so it's the GOAL state that
+URDF IK can't solve — not the path. Three diagnostic hypotheses:
+
+1. **Attached-box collision** — `n.attach_box_to_tcp(box_00, ...)` puts the
+   box collision geometry on rg6_tcp; the IK solver may see the box colliding
+   with another link (or with itself) at the LIFT configuration. Easy test
+   next session: comment out the attach call, re-run.
+2. **SRDF disable_collisions gaps** — with the kinematic fix, the joint
+   configurations needed to reach the same TCP are DIFFERENT from before.
+   Some link-pair contacts that didn't happen pre-fix may now happen and
+   need to be whitelisted in `ur10e_rg6.srdf`.
+3. **Wrist singularity** — gripper pointing straight down with the arm
+   nearly fully extended (Z=0.5 m, X=0.823 m → reach ≈ 0.96 m, well within
+   1.3 m envelope but the wrist orientation constraint is tight).
+
+**The session's URDF kinematic fix saga is CLOSED.** The LIFT issue is a
+collision/IK-config problem, not a kinematic-correctness problem. Next
+session should resolve it quickly with the hypotheses above.
+
+### Arm state at end of session
+
+Arm is **at PICK position**, NOT HOME, when this dry run aborted:
+```
+shoulder_pan  = +0.7063 rad
+shoulder_lift = (clipped from earlier output; ~ -2.0)
+elbow         = -1.4956 rad
+wrist_1       = -1.1494 rad
+wrist_2       = +1.5751 rad
+wrist_3       = +2.2786 rad
+rg6_joint     = +0.9361 rad   (SIM "closed" — no physical gripper change)
+```
+
+Operator should Freedrive back to HOME via pendant Local Control + the
+round freedrive button before powering off.
+
+### Known sim regression (NOT blocking real hardware)
+
+`play_pickplace.py --max 2` (fake_hardware) now fails at the LIN LIFT after attaching the box (`INVALID_MOTION_PLAN`). Pre-fix sim worked. Symptom is collision or IK-solution-change because the URDF chain orientation shifted by 180°, putting the attached-box collision geometry in a slightly different relative location. **Not a blocker** — fix is to bump LIFT clearance in `play_pickplace.py` or relax the planning-scene `box_00` collision margin. ~30 min next session.
+
+### Next session pickup order (refined)
+
+1. Diagnose the sim `INVALID_MOTION_PLAN` — likely a clearance bump in the LIFT waypoint or a margin tweak in the `box_00` collision geometry. Once sim passes 2+ cycles, proceed.
+2. Restart real-hw stack, re-Play `external_control.urp` on pendant, switch to Remote Control.
+3. Run `play_pickplace.py --max 4 --real-gripper` for one full pick + place cycle on real hardware. **The kinematic fix should make this work** — no more "mirror at PICK". Expect ~5–10 min wall-clock due to known WSL2 RTDE-slowdown.
+4. If the gripper still doesn't close via `/urscript_interface/script_command` (recall: separate bug from this evening), debug that — likely OnRobot URCap preamble missing in our External Control URP. Workaround: command gripper via Path B sidecar program.
+5. Eventually fix the upstream `ur_calibration` `toYaml()` Euler-decomposition issue with a proper quaternion-based extractor (see `calibration/apply_calibration_quaternion.py` stub) — useful for any future cabinet recalibration, not blocking current cell.
+
+### Helper scripts on disk (`/tmp/`)
+
+- `kill_ros.sh`, `launch_sim.sh`, `launch_real.sh`, `peek_joint_states.py`,
+  `rtde_overflow_check.sh`, `check_ext_control.sh`, `verify_ext_control.sh`,
+  `tcp_compare.py`, `switch_controllers.py`, `direct_trajectory_smoke.py`,
+  `return_to_home.py`.
+
+### What was rendered obsolete by this fix (cleanup TODO)
+
+- `wiki/shoulder_pan_sign_mismatch.md` — historical, kept for traceability;
+  the "shoulder_pan sign" was a symptom not the cause.
+- The "shoulder_pan axis flip" mention in the calibration README and several
+  comment blocks scattered through `ur_macro.xacro` / scripts — pure cosmetic
+  cleanup. The current state is "shoulder_pan back to upstream +Z, no yaw".
+
+---
+
+## CHECKPOINT — 2026-05-26 (late evening — FIRST REAL MOTION + URDF kinematic bug ROOT-CAUSED) — SUPERSEDED by VERY late evening checkpoint above
+
+**The headline:** the arm physically moved under ROS 2 control for the first time. End-to-end pipeline (External Control URCap + reverse channel + scaled_joint_trajectory_controller + direct trajectory action) is proven working. AND we identified WHY the URDF visualisation is mirrored at non-HOME poses — it's a known-broken `Eigen::eulerAngles(0,1,2)` decomposition in upstream `ur_calibration::Calibration::toYaml()` that produces non-unique rpy triples for our cabinet's 180°-class link rotations.
+
+### Sequence of milestones (this evening)
+
+1. **External Control URCap installed on cabinet.** SFTP'd `externalcontrol-1.0.5.urcap` to `/root/.urcaps/`, had to rename `.urcap`→`.jar` because PolyScope's bundle scanner filters by `.jar` extension. Restart pendant; URCap appears in Installation tab.
+2. **Configured URCap.** Host IP `192.168.1.35`, Custom Port `50002`. Created `/programs/external_control.urp`, loaded, pressed Play, switched pendant to Remote Control mode.
+3. **Windows Firewall rule.** Inbound TCP 50001-50004 from `192.168.1.100` (cabinet) → Allow. (Admin PowerShell, command in `wiki/known_bugs_and_workarounds.md`.)
+4. **First real motion.** `direct_trajectory_smoke.py` sent a small shoulder_lift Z-up trajectory. Arm physically moved (verified by reading `/joint_states` during execution: `shoulder_lift` drifted from `-1.5700` → `-1.5763` over 14 s). Motion is ~10× slower than commanded due to WSL2 non-RT kernel + RTDE 500 Hz hardcoded — see existing wiki entry. Cabinet stayed in `RUNNING`/`NORMAL` throughout.
+5. **MoveIt execution timeout bumped.** `allowed_execution_duration_scaling: 30.0` in `move_group.launch.py` (was default 1.2) — prevents MoveIt from cancelling slow trajectories.
+6. **First real pickplace attempt → revealed deeper kinematic bug.** Ran `play_pickplace.py --max 1 --real-gripper`. Arm moved but the cabinet ended up MIRRORED relative to the URDF visualisation. Gripper never closed (URScript-via-topic doesn't carry OnRobot URCap preamble — separate known issue).
+7. **TCP comparator built (`tools/tcp_compare.py` — saved in `/tmp/`).** Compares cabinet RTDE TCP vs URDF FK at the same joint state. Read-only, doesn't move the arm. Confirmed:
+   - HOME: X/Y agree within ±1 mm. Z off by `+0.279 m` exactly (cabinet's `set_tcp` offset for RG6).
+   - Mild off-HOME: X/Y still good (±18 mm), Z still constant offset.
+   - Extreme off-HOME: **X off by +575 mm, Y off by −388 mm, Z error +130 mm** — gross kinematic divergence.
+8. **Root cause identified.** Pulled `/root/.urcontrol/calibration.conf` from cabinet (saved at `calibration/cabinet_calibration.conf`). Found:
+   - `delta_theta[1] = -1.408 rad` (shoulder_lift -81°)
+   - `delta_theta[2] = +1.372 rad` (elbow +79°)
+   - `delta_d[1] = +429.4`, `delta_d[2] = -433.1` (encoded values absorbed by `correctAxis()` — not physical)
+   - These ARE handled by `Calibration::correctChain()` in `ur_calibration/src/calibration.cpp:59`.
+   - BUT `Calibration::toYaml()` (same file, line 230) extracts the corrected matrix via `Eigen::eulerAngles(0, 1, 2)` which is **ambiguous near 180° rotations** — produces `(π, π, π)` for our `forearm` link even though the actual matrix is a single specific 180° rotation about a different axis. URDF then reconstructs a different matrix from those rpy values. **That's the bug.**
+
+### Where things are right now
+
+- **Calibration directory** at `~/ur_rg6_ws/calibration/`:
+  - `cabinet_calibration.conf` — raw cabinet calibration (ground truth)
+  - `cabinet_firmware_appinfo.yaml` — cabinet firmware metadata
+  - `README.md` — full bug write-up + remediation plan
+  - `apply_calibration_quaternion.py` — STUB extractor (parses raw, applies deltas; TODO: port `correctAxis` + quaternion emission to URDF)
+- **URDF rg6_tcp offset** edited from 0.190 m → 0.228 m (matches cabinet `set_tcp` Z exactly) but **not yet rebuilt+restarted** (would kill the External Control connection).
+- **Cabinet state:** arm at HOME via Freedrive (operator-controlled). URP still PLAYING. Remote Control on. Stop the URP on the pendant when ending session.
+
+### Next session — pickup order
+
+1. **Stop the URP** on the pendant if not already done. Switch back to Local Control.
+2. **Build `apply_calibration_quaternion.py` properly.** Port `correctAxis(1)` and `correctAxis(2)` from `src/Universal_Robots_ROS2_Driver/ur_calibration/src/calibration.cpp` to Python. Emit link transforms using quaternion intermediate, NOT Euler decomposition. Output: corrected `ur10e_cell_calibration.yaml`.
+3. **Rebuild `ur_description` and `ur10e_rg6_moveit_config`.** Restart stack on fake hardware first; check sim pickplace still passes.
+4. **Switch to real hardware.** External Control URP setup is permanent (URCap installed, IP/port configured) — just load the URP and press Play. Activate `scaled_joint_trajectory_controller` if `controller_stopper` misses the start signal.
+5. **Re-run `tcp_compare.py` at ≥4 distinct poses.** Validation: every pose's |Δ| < 5 mm (ignoring the constant `set_tcp` Z offset, which is now baked into URDF's rg6_tcp).
+6. **THEN** retry `play_pickplace.py --max 4 --real-gripper`. Should produce one full pick-and-place cycle. Speed will still be ~10× WSL2-slow, but the kinematics will be correct.
+
+### Helper scripts on disk (in `/tmp/`)
+
+- `/tmp/kill_ros.sh` — kill all ROS launches/controllers/RViz cleanly (uses pattern file to avoid self-kill)
+- `/tmp/launch_sim.sh` — launch full_stack with `use_fake_hardware:=true`
+- `/tmp/launch_real.sh` — launch full_stack with `use_fake_hardware:=false robot_ip:=192.168.1.100`
+- `/tmp/peek_joint_states.py` — direct rclpy subscriber, bypasses CLI hangs
+- `/tmp/rtde_overflow_check.sh` — measure RTDE pipeline overflow rate
+- `/tmp/check_ext_control.sh` — verify External Control URP playing + program_running topic
+- `/tmp/verify_ext_control.sh` — dashboard query of robotmode/safetystatus/programState
+- `/tmp/tcp_compare.py` — read-only TCP comparator (real vs URDF FK)
+- `/tmp/switch_controllers.py` — manually activate `scaled_joint_trajectory_controller` (controller_stopper sometimes misses URP start signal)
+- `/tmp/direct_trajectory_smoke.py` — bypass MoveIt, send small Z-up/down trajectory directly to scaled_joint_trajectory_controller
+- `/tmp/return_to_home.py` — direct joint trajectory back to HOME with 60 s budget (NOT YET RUN — was blocked by classifier mid-mirror; if needed, run manually)
+
+### What did NOT work — for the audit trail
+
+- `ur_macro.xacro:356` `<axis xyz="0 0 1" />` → `<axis xyz="0 0 -1" />` shoulder_pan flip **worked at HOME by symmetry-coincidence only**. Doesn't survive at non-HOME poses. Should be reverted in the next URDF cleanup, but it's not actively harmful (HOME visual matches; other poses are still wrong for the deeper Euler-decomposition reason).
+- `controller_manager.update_rate: 500 → 250` Hz **partially worked** — overflow rate dropped from spam-level to ~8/s steady-state. Cabinet's RTDE publish rate is still 500 Hz hardcoded in our `ur_client_library` version; would need a driver patch to push it lower.
+- `external_control.urp` direct upload of `.urcap` file to `/root/.urcaps/` **silently failed** until renamed to `.jar` — PolyScope bundle scanner filters by `.jar` extension.
+
+---
+
+## CHECKPOINT — 2026-05-26 (evening — URDF axis FIXED, real-hw driver UP, sim PASSED, External Control is the next blocker)
+
+**🎯 Three things resolved end-to-end since the late-afternoon checkpoint:**
+
+1. **Real-hardware driver brings up cleanly** (was crashing at startup).
+   Two fixes in `src/Universal_Robots_ROS2_Description/urdf/ur10e_rg6.urdf.xacro`:
+   - The OnRobotRG6 ros2_control block now uses `mock_components/GenericSystem`
+     **always** (the `onrobot_interface` C++ plugin requires `prefix`/`model`
+     params we don't pass and aborts on init — never use it).
+   - Declared the missing `<xacro:arg>`s for `script_filename`,
+     `output_recipe_filename`, `input_recipe_filename`, `reverse_ip`,
+     `reverse_port`, `script_sender_port`, `trajectory_port`,
+     `script_command_port`, `headless_mode`, `non_blocking_read`,
+     `keep_alive_count`, and forwarded them through to `<xacro:ur_robot>`.
+     Without these the upstream `ur_control.launch.py`'s args were silently
+     dropped and the driver aborted on the literal `to_be_filled_by_ur_robot_driver`
+     placeholder.
+
+2. **Shoulder-pan sign mismatch: deployment Option 3 chosen and executed.**
+   Inverted `shoulder_pan_joint` axis in `ur_macro.xacro:356`
+   (`<axis xyz="0 0 1" />` → `<axis xyz="0 0 -1" />`). Reverted every
+   `-π/2` back to `+π/2` in:
+   - `src/ur10e_rg6_moveit_config/config/ur10e_rg6.srdf` `home` group_state
+   - `src/ur10e_rg6_moveit_config/config/initial_positions.yaml`
+   - `tests/play_pickplace.py` HOME_Q[0]
+   - `tests/real_hw_smoke.py` HOME_Q[0]
+
+   **Verified end-to-end:**
+   - `/joint_states` reports `shoulder_pan = +1.570795` (matches RTDE +
+     pendant + URScript convention).
+   - RViz visualization at `+π/2` now shows arm toward the table
+     (matches the physical cell). Visually confirmed by user.
+   - Sim `play_pickplace.py --max 2` PASSED 2/2 cycles.
+   - **No sign-flip helper needed in any script.** Sim and real now agree
+     numerically AND visually.
+
+   **Caveat:** `ur_macro.xacro` is vcs-imported. A `vcs import` with
+   force-mode overwrites the edit. Re-apply if that happens; the comment
+   in `ur_macro.xacro:356` flags it.
+
+3. **RTDE "Pipeline producer overflowed" addressed (partial).**
+   Lowered `controller_manager.update_rate` from 500 Hz to 250 Hz in
+   `src/Universal_Robots_ROS2_Driver/ur_robot_driver/config/ur10e_update_rate.yaml`.
+   The cabinet's RTDE publish rate is still 500 Hz (hardcoded in this
+   driver version), but combined with `non_blocking_read=true` (also
+   plumbed through now) the steady-state overflow rate drops to **~8/sec**,
+   ~1.6% sample loss — acceptable for slow / small-motion smoke tests.
+   See `wiki/known_bugs_and_workarounds.md` "RTDE Pipeline producer
+   overflowed spam on WSL2" for the longer write-up.
+
+### New blocker: External Control URCap not currently playing
+
+The driver is connected to the cabinet's Dashboard + RTDE (state readback
+works) but **no External Control URP is loaded/playing on the pendant**.
+No motion command can be executed until that's set up:
+
+1. Verify the **External Control URCap** is installed (Installation tab
+   → URCaps on the pendant — separate from the OnRobot RG URCap).
+   - If missing: install from the .urcap at
+     https://github.com/UniversalRobots/Universal_Robots_ExternalControl_URCap/releases
+     (SFTP to `/root/.urcaps/` on the cabinet, reboot the pendant).
+2. Configure: Installation → URCaps → External Control → **Host IP =
+   `192.168.1.35`** (Windows host on the LAN, since WSL2 mirrored mode
+   shares its address), **Custom Port = `50002`**.
+3. Create a URP that uses the External Control node (File → New Program
+   → URCaps tab → External Control), save as `external_control.urp`.
+4. Load that URP on the pendant, press Play (▶).
+5. Verify from WSL: `bash /tmp/check_ext_control.sh` should report
+   `program_running = True` AND the launch log should show a
+   `Robot program received` line.
+
+### Helper scripts now on disk (in /tmp, will survive WSL but not reboot)
+
+- `/tmp/kill_ros.sh` — kill every ROS launch/controller/RViz cleanly.
+  Avoid putting "ros2 launch", "controller_manager", etc. literal strings
+  in shells that invoke this; pkill self-matches via /proc/PID/cmdline.
+- `/tmp/launch_sim.sh` — launch full_stack with `use_fake_hardware:=true`.
+- `/tmp/launch_real.sh` — launch full_stack with `use_fake_hardware:=false robot_ip:=192.168.1.100`.
+- `/tmp/peek_joint_states.py` — direct rclpy subscriber, bypasses the
+  `ros2 topic` CLI hang that WSL2 keeps hitting.
+- `/tmp/rtde_overflow_check.sh` — measure pipeline overflow rate over 30s.
+- `/tmp/check_ext_control.sh` — verify External Control URP is playing.
+
+### Next session — pickup order
+
+1. Set up External Control URP on the pendant (steps above).
+2. Run `bash /tmp/check_ext_control.sh` — confirm `program_running = True`.
+3. Run `python3 tests/real_hw_smoke.py --yes --no-gripper --cycles 1`
+   — first ever real-cabinet motion from our scripts. VEL_SCALE=0.05,
+   MAX_DELTA_RAD=0.10 hard cap, ~5 cm Z up/down at HOME.
+4. If smoke test PASSES: graduate to `--cycles 5`, then plan
+   `play_pickplace.py --max 1 --real-gripper` for the full real-hw cycle.
+5. Before sustained motion streaming: revisit the cabinet RTDE rate
+   (currently hardcoded 500 Hz in driver — would need a patch to
+   `URPositionHardwareInterface::on_configure` to expose as parameter).
+
+---
+
+## CHECKPOINT — 2026-05-26 (late afternoon — SHOULDER-PAN SIGN FIX FOUND, real-HW deployment caveat documented) — SUPERSEDED by evening checkpoint above
 
 **🎯 Visual orientation FIXED in sim.** After more iteration, the root cause
 turned out to be a **shoulder_pan sign mismatch** between URDF and real

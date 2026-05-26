@@ -97,6 +97,32 @@ Real cabinet at physical HOME → `shoulder_pan = +π/2`.
 Our SIM scripts at the same visual pose → `shoulder_pan = −π/2`.
 **Δ = 180° on shoulder_pan, 0 on all others. Verified.**
 
+### ✅ DOUBLE-CONFIRMED via ur_robot_driver `/joint_states` — 2026-05-26 (late)
+
+After bringing up the real-hardware stack with `use_fake_hardware:=false`,
+a direct rclpy subscriber on `/joint_states` (cabinet at physical HOME):
+
+```
+shoulder_pan_joint   +1.570802
+shoulder_lift_joint  -1.570781
+elbow_joint          -1.570771
+wrist_1_joint        -1.570786
+wrist_2_joint        +1.570796
+wrist_3_joint        +1.570824
+rg6_joint            +0.770000   (mock_components initial_value, no real
+                                  data — RG6 is mock-only on real hardware)
+```
+
+**The ur_robot_driver passes the RTDE value through unchanged — it does NOT
+apply any sign correction between the cabinet and ROS.** This means:
+
+- Whatever the RTDE pendant convention reports, `/joint_states` matches it.
+- Our SRDF/initial_positions/scripts that use `shoulder_pan = −π/2` make
+  the URDF visualize correctly **but would command the cabinet to the
+  wrong side** if sent verbatim via `scaled_joint_trajectory_controller`.
+- The deployment options in the "Critical caveat" section below are
+  STILL THE OPEN DECISION before any motion command on real hardware.
+
 ### What this means
 
 - Sim with `shoulder_pan = −π/2` produces the same physical-looking
@@ -146,7 +172,97 @@ We'd be fixing the symptom, not the cause.
 The verification MUST happen at the cell before sending any motion
 to the real robot via our scripts.
 
-## Critical caveat for real hardware
+## ⚠️ FOLLOW-UP 2026-05-26 (late evening) — TRUE root cause found, axis-flip-only fix was insufficient
+
+The "axis-flip-only" fix below worked at HOME by exploiting a symmetry
+coincidence, BUT at any non-HOME pose the URDF visualization is mirrored
+from the real cabinet — verified empirically with `tcp_compare.py`:
+
+```
+                 HOME |Δ|   EXTREME |Δ|
+axis-flip only   0.4 mm     854 mm    ← matches at HOME by symmetry only
+true fix (B)     0.4 mm     0.4 mm    ← matches everywhere
+```
+
+`calibration/fk_experiment.py` runs URDF FK under four hypotheses and
+proves the actual fix is:
+
+1. **REMOVE** the 180° yaw on `base_link → base_link_inertia` in
+   `ur_macro.xacro:350` (was `rpy="0 0 ${pi}"`, now `rpy="0 0 0"`).
+2. **REVERT** the shoulder_pan axis flip in `ur_macro.xacro:364`
+   (was `<axis xyz="0 0 -1"/>` from the symptom-patch, now back to
+   `<axis xyz="0 0 1"/>` per upstream).
+
+These two changes cancel out at HOME (both fix and bug give the same
+HOME tool0) but ONLY the proper fix works at every other pose.
+
+HOME_Q in all scripts/SRDF/initial_positions stays at `[+π/2, -π/2, -π/2,
+-π/2, +π/2, +π/2]` — no change needed there. The cabinet's RTDE convention
+and the URDF now agree on what shoulder_pan = +π/2 means physically.
+
+The upstream comment at `ur_macro.xacro:345-348` ("'base_link' is REP-103
+aligned ... internal frames of the robot/controller have X+ pointing
+backwards") is wrong for THIS cabinet's primary-interface output — our
+cabinet exposes kinematic data already in REP-103 base frame.
+
+See `calibration/fk_experiment.py` for the empirical proof script and
+`calibration/README.md` for the wider calibration-extraction context.
+
+---
+
+## ✅ RESOLVED 2026-05-26 — URDF axis fixed, sim and real now agree
+
+**Final fix applied.** After confirming via `/joint_states` that the
+ur_robot_driver passes the cabinet's `+π/2` shoulder_pan value through
+unchanged (no sign correction), we chose Option 3 from below: fix the
+URDF axis convention so sim and real both use `+π/2` for HOME.
+
+### What changed
+
+1. **`src/Universal_Robots_ROS2_Description/urdf/ur_macro.xacro:356`**
+   Inverted the `shoulder_pan_joint` axis:
+   ```xml
+   <!-- before -->
+   <axis xyz="0 0 1" />
+   <!-- after -->
+   <axis xyz="0 0 -1" />
+   ```
+2. Reverted every script/config back to `+π/2`:
+   - `src/ur10e_rg6_moveit_config/config/ur10e_rg6.srdf` home group_state
+   - `src/ur10e_rg6_moveit_config/config/initial_positions.yaml`
+   - `tests/play_pickplace.py` HOME_Q[0]
+   - `tests/real_hw_smoke.py` HOME_Q[0]
+
+### Why this is the right fix
+
+- Pendant, RTDE, `/joint_states`, `dodectest3.urp`, Grasshopper outputs —
+  every external interface uses the cabinet's `+π/2` convention.
+- The only outlier was our URDF. Flipping the joint axis aligns the
+  URDF's local convention with the cabinet's without touching any
+  external interface.
+- No sign-flip helper is needed in any script. No re-teach of the
+  cabinet HOME is needed.
+- Sim and real both visualize and command HOME at `+π/2`.
+
+### Risk — `ur_macro.xacro` is vcs-imported
+
+The file lives under `src/Universal_Robots_ROS2_Description/` and is
+managed by `ros2.repos`. **A `vcs import src < ros2.repos --force` will
+overwrite this edit.** If that happens:
+- Re-apply the one-line axis change (see "What changed" above).
+- The comment in `ur_macro.xacro:356` flags the edit for greppability.
+
+The (untried) longer-term alternative is to fork that package into our
+own repo and bump `ros2.repos` to point at the fork.
+
+### What "Critical caveat for real hardware" used to say
+
+The text below documented the three deployment options when this issue
+was open. Kept for traceability; superseded by the resolution above.
+
+---
+
+## Critical caveat for real hardware (HISTORICAL — superseded by resolution above)
 
 **The fix is SIM-only.** On the real cabinet:
 - The URScript HOME (verified in `dodectest3.urp`) is `[+pi/2, -pi/2, -pi/2, -pi/2, +pi/2, +pi/2]`

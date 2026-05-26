@@ -1,9 +1,9 @@
 initial_positions:
-  # NOTE 2026-05-26: shoulder_pan flipped to -pi/2 (from +pi/2) so URDF sim
-  # matches the physical cell at HOME. The URDF and real cabinet have
-  # opposite shoulder_pan_joint axis convention — same numerical value
-  # produces opposite physical direction. Sim-only fix.
-  shoulder_pan_joint:  -1.5708
+  # 2026-05-26 (later): URDF and real cabinet now agree on shoulder_pan
+  # sign after flipping the ur_macro.xacro shoulder_pan_joint axis from
+  # "0 0 1" to "0 0 -1". HOME shoulder_pan = +pi/2 on both sim and real.
+  # See wiki/shoulder_pan_sign_mismatch.md.
+  shoulder_pan_joint:   1.5708
   shoulder_lift_joint: -1.5708
   elbow_joint:         -1.5708
   wrist_1_joint:       -1.5708

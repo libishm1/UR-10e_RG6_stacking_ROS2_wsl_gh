@@ -74,7 +74,16 @@ def generate_launch_description():
             moveit_controllers,
             {"publish_robot_description_semantic": True,
              "allow_trajectory_execution": True,
-             "moveit_manage_controllers": False},
+             "moveit_manage_controllers": False,
+             # WSL2 + real-hw streaming runs ~10x slower than commanded due to
+             # RTDE producer overflow + non-RT kernel; default 1.2x execution
+             # bound would cancel every trajectory. Bumping to 30x is generous
+             # but fine because the cabinet's URP also enforces its own safety
+             # timeouts. Reset to 1.2 once we move ros2_control off WSL2.
+             # See wiki/known_bugs_and_workarounds.md RTDE entry.
+             "trajectory_execution.allowed_execution_duration_scaling": 30.0,
+             "trajectory_execution.allowed_goal_duration_margin": 30.0,
+             "trajectory_execution.allowed_start_tolerance": 0.05},
         ],
     )
 
