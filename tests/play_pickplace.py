@@ -218,7 +218,7 @@ DRY_RUN_CLEARANCE_M = 0.0  # was 0.10 during dry run; 0.0 = full contact heights
 # follows the gripper. This isolates the "attached box collides at LIFT
 # config" hypothesis from the kinematic chain. Set to False for production
 # (we WANT the attached-box collision check during real motion).
-DRY_RUN_DISABLE_ATTACH = True
+DRY_RUN_DISABLE_ATTACH = True  # 2026-05-26: tested False with +45mm Z calibration — LIFT still fails INVALID_MOTION_PLAN. The Z shift is common-mode (moves waypoints AND attached box together), so relative geometry vs gripper finger meshes is unchanged. Real fix is touch_links in attach_box_to_tcp.
 
 # WAYPOINT_TOOL_CALIBRATION_M — world-frame XYZ shift applied to every
 # waypoint X/Y/Z BEFORE sending to MoveIt. Compensates for the OnRobot
