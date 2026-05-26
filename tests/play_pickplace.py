@@ -218,7 +218,7 @@ DRY_RUN_CLEARANCE_M = 0.0  # was 0.10 during dry run; 0.0 = full contact heights
 # follows the gripper. This isolates the "attached box collides at LIFT
 # config" hypothesis from the kinematic chain. Set to False for production
 # (we WANT the attached-box collision check during real motion).
-DRY_RUN_DISABLE_ATTACH = True  # 2026-05-26 three empirical tests of attach-collision: Z=+45mm common-mode ❌, -5mm independent box offset ❌, Z=+55mm common-mode ❌. All fail INVALID_MOTION_PLAN at LIFT. Common-mode shifts preserve relative geometry; small relative offset doesn't clear finger mesh envelope. Real fix is touch_links in attach_box_to_tcp — next session.
+DRY_RUN_DISABLE_ATTACH = True  # 4 empirical tests of attach-collision: Z=+25/+45/+55mm common-mode + -5mm independent box offset, ALL fail INVALID_MOTION_PLAN at LIFT. The finger collision meshes wrap rg6_tcp tightly; only touch_links in attach_box_to_tcp can clear the legitimate gripping overlap.
 
 # Independent Z offset for the box's centroid relative to the URScript TCP
 # pose when attaching to rg6_tcp. NEGATIVE = box sits BELOW gripper TCP in
@@ -249,7 +249,7 @@ BOX_ATTACH_Z_OFFSET_M = 0.0
 # see the SAME tool-frame calibration error manifest as a DIFFERENT world-
 # frame offset. For per-pose correctness use Option 1 (set_tcp via URScript)
 # or fix OnRobot_Single via the OnRobot URCap settings page if available.
-WAYPOINT_TOOL_CALIBRATION_M = (-0.00666, +0.01052, +0.045)  # X/Y verified mm-level @ gripper-down (R_y(180°)). Z = +45 mm: URCap set_tcp defines TCP at the OPEN finger center; RG6 fingers pivot inward + slightly DOWN on close, so command open gripper 5 mm higher than final contact point. Empirically verified on real hw 2026-05-26.
+WAYPOINT_TOOL_CALIBRATION_M = (-0.00666, +0.01052, +0.045)  # X/Y mm-level verified @ gripper-down. Z=+45 mm real-hw-tuned (RG6 fingers pivot down on close → command open gripper 5 mm higher than contact). Independent of attach-collision (4 tests confirmed).
 if any(abs(v) > 1e-9 for v in WAYPOINT_TOOL_CALIBRATION_M):
     _wx, _wy, _wz = WAYPOINT_TOOL_CALIBRATION_M
     WAYPOINTS = {
