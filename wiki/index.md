@@ -31,6 +31,12 @@ let it die in a chat transcript.
 - [RViz GPU rendering under WSL2](rviz_gpu_rendering.md) — verified
   D3D12 passthrough via WSLg to Intel UHD 630. How to confirm,
   what to do if you ever see `llvmpipe` fallback.
+- [RViz visual orientation mismatch (unresolved)](rviz_visual_orientation_mismatch.md) —
+  documented: RViz arm at HOME extends in opposite direction from real
+  cell. Calibration extraction + URDF base rotation + visual mesh
+  rotation all tried, none fix it. Doesn't affect real-hardware
+  motion (controller uses its own calibration). Accept as known
+  cosmetic limitation.
 - [WSL2 networking deep-dive](../docs/WSL2_UR10e_NETWORKING.md) — fallback
   ladder (mirrored → bridged → NAT+portproxy → native Linux). Lives outside
   the wiki because it's a setup guide users follow step-by-step.

@@ -3,6 +3,65 @@
 Last updated: 2026-05-23. Read this first; it covers the current state and how
 to pick up where we left off.
 
+## CHECKPOINT — 2026-05-26 (afternoon — RViz visual mismatch closed as cosmetic)
+
+User at the cell. After extensive attempts to make RViz visually match the
+physical robot orientation at HOME (multiple URDF rotations, mesh visual
+overrides, calibration applications), **none fixed the visual mismatch.**
+Decision: accept it as cosmetic-only and move forward.
+
+### Full attempt list (everything we tried, none fixed it)
+
+1. Apply `kinematics_parameters_file` from `ur_calibration calibration_correction`
+   → small per-link corrections, no gross orientation change. Calibration is
+   still in URDF (harmless, may help later).
+2. Rotate `base_link_inertia` visual mesh by `${pi/2}` (was `${pi}`).
+   Reverted: base mesh is rotationally symmetric so the rotation was
+   invisible.
+3. Apply `<origin xyz="0 0 0" rpy="0 0 pi">` to the `ur_robot` macro mount.
+   Reverted: rotated the whole scene 180° in world, but the arm in RViz
+   STILL appears flipped relative to the cabinet body — same as before
+   from the user's comparison angle.
+4. Various RViz camera angle changes (Yaw 0, π, 5π/4 etc.). Cosmetic only,
+   doesn't fix.
+5. `wsl --shutdown` reset of WSLg. Fixed a separate "pink window" rendering
+   issue but didn't change the kinematic-visual.
+
+### Conclusion / decision
+
+**Accept the visual mismatch as a known cosmetic limitation.** Reasons:
+- `tests/measure_real_robot_pose.py` showed sim TCP at HOME has Z ≈ 1.485 m
+  but real TCP Z ≈ 0.400 m — a 1m+ kinematic-model mismatch the per-link
+  calibration doesn't fix. This is the root cause; rotation just shuffles
+  symptoms.
+- Real-hardware motion will work correctly because the controller uses
+  its own factory calibration regardless of what our URDF predicts.
+- RViz visualization is still useful for planning + collision checking,
+  just not pixel-accurate.
+
+### Documented locations
+
+- `wiki/rviz_visual_orientation_mismatch.md` — full investigation,
+  attempt list, dive-deeper options if future session wants visual parity
+- Memory: `project_ur10e_rg6_workspace.md` 2026-05-26-afternoon entry +
+  lesson learned ("don't grind on URDF rotations to fix visual-only issues
+  when kinematics work")
+- This handoff (above checkpoint)
+
+### Current state (committed and on GitHub)
+
+- URDF: reverted to default mount (`rpy="0 0 0"`); mesh rotation back
+  to nominal `${pi}`; calibration yaml `ur10e_cell_calibration.yaml` is
+  loaded via `kinematics_parameters_file`
+- All `play_pickplace.py` 10/10 verified in sim with current state
+- Single RViz window, no dual-RViz, WSLg working after `wsl --shutdown`
+
+### Next: Phase 5 of validation plan
+
+`python3 ~/ur_rg6_ws/tests/real_hw_smoke.py --yes --no-gripper`
+on the real cell. Slow (5%), small joint perturbation (±0.05 rad), hard
+caps. First actual real-arm motion.
+
 ## CHECKPOINT — 2026-05-26 (at-the-cell session)
 
 **User physically at the cell, real UR10e + RG6 powered on.** Worked through
