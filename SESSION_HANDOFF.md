@@ -191,6 +191,132 @@ round freedrive button before powering off.
 - `/tmp/direct_trajectory_smoke.py` — bypass MoveIt, send small Z-up/down trajectory directly to scaled_joint_trajectory_controller
 - `/tmp/return_to_home.py` — direct joint trajectory back to HOME with 60 s budget (NOT YET RUN — was blocked by classifier mid-mirror; if needed, run manually)
 
+### Session extension — calibration + first FULL real-hardware pickplace cycle (very-very late evening)
+
+After the kinematic-fix verification, we kept pushing and got real-hardware
+pickplace motion working end-to-end:
+
+1. **MoveIt `execution_duration_monitoring: False`** added to
+   `move_group.launch.py` (default 1.2× planned-time timeout was killing
+   slow LIN descents on WSL2 — see [`wiki/known_bugs`](wiki/known_bugs_and_workarounds.md)).
+   With this disabled the cabinet can take as long as it needs for a slow
+   move; cabinet's own URP safety timeouts still bound execution.
+2. **`DRY_RUN_DISABLE_ATTACH = True`** in `play_pickplace.py` skips the
+   planning-scene `attach_box_to_tcp` / `detach_box_at` calls. Confirmed
+   hypothesis 1: the attached-box collision check (missing `touch_links`)
+   was blocking the LIFT step. Skipping the attach unblocks the full
+   PICK→LIFT→TRANSIT→PLACE sequence. Production fix is to pass
+   `touch_links=['rg6_tcp','rg6_finger_*_finger_tip','rg6_finger_*_flex_finger','rg6_body']`
+   to the attach call — deferred.
+3. **`WAYPOINT_TOOL_CALIBRATION_M = (-0.00666, +0.01052, +0.045) m`** in
+   `play_pickplace.py` — world-frame shift applied to every waypoint
+   X/Y/Z before sending. Calibration of OnRobot URCap's `set_tcp`
+   (`OnRobot_Single`) vs physical fingertip:
+   - **X/Y** measured 2026-05-26 by reading pendant TCP at a known
+     commanded pose (`pendant = (829.66, 462.48, …)` for command
+     `(823, 473, …)` → world delta `(+6.66, -10.52, 0)` mm → we shift
+     waypoints by the negative).
+   - **Z = +45 mm**: empirically iterated. The URCap defines the TCP at
+     the OPEN finger center; the RG6 fingers pivot inward AND slightly
+     DOWN as they close (~5 mm of Z descent during closure). +45 mm
+     command-frame keeps the open gripper above the workpiece such that
+     post-closure the fingertips land at contact.
+   - Caveat: X/Y calibration is **gripper-down (R_y(180°)) orientation
+     only**. Place waypoints have different rotations
+     `(2.221, 2.221, 0)` — the same tool-frame OnRobot_Single error
+     manifests as a different world-frame offset there. Plan for
+     next session: switch SRDF tip_link from `tool0` to `ee_link`/`rg6_tcp`
+     (already matches cabinet `set_tcp` within 0.4 mm post-URDF-fix), so
+     MoveIt plans directly for the gripper grasp point and the
+     orientation-dependent error vanishes.
+4. **`DRY_RUN_CLEARANCE_M = 0.0`** — running pickplace at real contact
+   heights (no aerial dry-run clearance).
+
+**Real-hardware pickplace `--max 2 --real-gripper` (1 full pick+place):**
+56 seconds wall-clock, all 9 motion steps clean (PTP HOME, grip 70, LIN
+approach, LIN pick deep, grip 50, LIN LIFT, LIN transit, LIN approach
+place, LIN place deep, grip 60). **No timeouts. No INVALID_MOTION_PLAN.
+No path tolerance violations.** First time a full pick+place sequence
+has executed end-to-end on real hardware under ROS 2 control.
+
+### Known issues still open after this session
+
+1. **`rg_grip()` URScript-via-topic doesn't engage the OnRobot URCap.**
+   Our `external_control.urp` is the bare External Control URCap node only;
+   it doesn't include the OnRobot URCap node, so the URCap's URScript
+   preamble (defining `rg_grip()`, `rg_payload_set()`, etc.) is not
+   loaded in the running URP's namespace. The driver sends `rg_grip(…)`
+   strings; URScript runtime no-ops the undefined call.
+
+   **JAR contents extracted to `/tmp/onrobot_urcap_extract/scripts/`** —
+   the OnRobot URCap's preamble is ~15 interdependent `.script` files
+   (`basics.engine.script`, `basics.globals.script`,
+   `basics.java_connect.script`, etc.). Several call back into the
+   URCap's Java runtime, so injecting them via `/urscript_interface/script_command`
+   is non-trivial (we'd be missing the Java backend that
+   populates `rg_Busy_arr`, `rg_Depth_arr`, etc.).
+
+   **Clean fix:** rebuild `external_control.urp` on the pendant to
+   include an **OnRobot RG node** at the top of MainProgram BEFORE the
+   External Control node. That loads the URCap's full preamble via
+   PolyScope's normal mechanism. ~5 min of pendant work.
+
+   **Reference:** `D:\robot_ws\reference\dodectest3.urp` has exactly this
+   structure (decompressed to `/tmp/dodectest3.xml` during this session
+   for analysis). The relevant XML is:
+   ```xml
+   <Contributed strategyClass="com.onrobot.urcap.unified.OR_RG"
+                strategyProgramNodeType="RG Grip"
+                strategyURCapDeveloper="OnRobot A/S"
+                strategyURCapName="OnRobot">
+     <dataModel>
+       <data key="rg-target-force" value="80.0"/>
+       <data key="rg-target-width" value="0.15"/>
+     </dataModel>
+   </Contributed>
+   ```
+
+2. **Gripper crashed into foamboard** at Z = 0 mm calibration (URCap TCP
+   is ~40 mm above physical fingertip). Resolved with `+45 mm` Z shift
+   above. Foamboard absorbed the bump; cabinet safety did NOT trip
+   (Robotmode RUNNING, Safetystatus NORMAL throughout).
+
+3. **Place-pose X/Y calibration unverified.** The +6.66/+10.52 mm shifts
+   are correct at gripper-down orientation; the place waypoints have
+   rotation `(2.221, 2.221, 0)` so the same tool-frame OnRobot_Single
+   error manifests as a different world-frame offset. Until SRDF
+   tip_link is moved to `ee_link`, expect place positions to be
+   miscalibrated by some millimeters in a different direction than
+   pick positions.
+
+### Architectural pivot — URP-driven motion (deferred but documented)
+
+User's insight: instead of replicating the cabinet's OnRobot URCap +
+kinematic calibration inside ROS, **execute Grasshopper-generated URPs
+natively on the cabinet** via Path B (SFTP + Dashboard load + play),
+and use ROS only for orchestration + state monitoring + scene
+visualization. The Grasshopper URP already encapsulates the perfect
+cabinet calibration (it uses the cabinet's own kinematics and
+OnRobot's TCP). This sidesteps all the
+URDF↔URCap↔cabinet-TCP frame plumbing we've been fighting tonight.
+
+**Next session plan:**
+1. (Operator, ~5 min) Rebuild `external_control.urp` on pendant with
+   OnRobot RG node + External Control node. Test URScript-via-topic
+   `rg_grip(50, 40)` engagement → if URCap preamble is now loaded the
+   real gripper will close.
+2. (Code, ~30 min) Switch SRDF tip_link from `tool0` to `ee_link`,
+   rebuild, retest. Eliminates the orientation-dependent
+   `WAYPOINT_TOOL_CALIBRATION_M` X/Y hack — MoveIt plans the same point
+   that URScript targets.
+3. (Code, ~1 hour) Build `tests/urscript_to_waypoints.py` — parses a
+   `.urp` (gzipped XML, extracts embedded URScript) OR `.script` file,
+   extracts `movel`/`movej`/`rg_grip` calls, emits a `waypoints.yaml`.
+   Modify `play_pickplace.py` to load WAYPOINTS from a yaml path.
+4. Closes the loop: Grasshopper → URP → parser → waypoints.yaml →
+   ROS execution against real hardware. End-to-end automated from
+   Grasshopper design to physical motion.
+
 ### What did NOT work — for the audit trail
 
 - `ur_macro.xacro:356` `<axis xyz="0 0 1" />` → `<axis xyz="0 0 -1" />` shoulder_pan flip **worked at HOME by symmetry-coincidence only**. Doesn't survive at non-HOME poses. Should be reverted in the next URDF cleanup, but it's not actively harmful (HOME visual matches; other poses are still wrong for the deeper Euler-decomposition reason).

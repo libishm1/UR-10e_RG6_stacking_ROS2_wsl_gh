@@ -210,7 +210,45 @@ WAYPOINTS = {
 # fly through the entire program 10 cm above the contact heights so nothing
 # is physically picked or placed — useful for verifying motion + orientation
 # end-to-end on real hardware before trusting the contact poses.
-DRY_RUN_CLEARANCE_M = 0.10
+DRY_RUN_CLEARANCE_M = 0.0  # was 0.10 during dry run; 0.0 = full contact heights
+
+# DRY_RUN_DISABLE_ATTACH — when True, skip the planning-scene
+# attach_box_to_tcp / detach_box_at calls. Box visualisation in RViz still
+# happens via the pre-spawned planning-scene boxes, but no collision body
+# follows the gripper. This isolates the "attached box collides at LIFT
+# config" hypothesis from the kinematic chain. Set to False for production
+# (we WANT the attached-box collision check during real motion).
+DRY_RUN_DISABLE_ATTACH = True
+
+# WAYPOINT_TOOL_CALIBRATION_M — world-frame XYZ shift applied to every
+# waypoint X/Y/Z BEFORE sending to MoveIt. Compensates for the OnRobot
+# URCap's OnRobot_Single TCP not matching the actual finger grasp point
+# on this cabinet (we can't edit OnRobot_Single via pendant — it's
+# URCap-managed).
+#
+# Measured 2026-05-26 at the pick-deep pose (gripper pointing straight
+# down, axis-angle (0.020, 3.133, 0.011) ~ R_y(180°)):
+#   pendant TCP   = (829.66, 462.48, -375.35) mm
+#   RTDE / cmd    = (823.00, 473.00,  +29.00) mm
+#   pendant − cmd = (+6.66, -10.52, -404.35) mm
+# The Z delta is the documented pendant-vs-RTDE 400 mm bug, NOT a real
+# offset (don't compensate). The X/Y are real tool-fingertip vs URCap-TCP
+# calibration error. We shift waypoints by the NEGATIVE of the delta so
+# the cabinet positions the arm such that the physical grasp point lands
+# at the original commanded position.
+#
+# IMPORTANT: only valid for waypoints with the same gripper-down orientation
+# as the pick set. Place waypoints (with different wrist rotations) will
+# see the SAME tool-frame calibration error manifest as a DIFFERENT world-
+# frame offset. For per-pose correctness use Option 1 (set_tcp via URScript)
+# or fix OnRobot_Single via the OnRobot URCap settings page if available.
+WAYPOINT_TOOL_CALIBRATION_M = (-0.00666, +0.01052, +0.045)  # X/Y verified mm-level @ gripper-down (R_y(180°)). Z = +45 mm: URCap set_tcp defines TCP at the OPEN finger center; when the RG6 fingers close they pivot inward and slightly DOWN, so we command the open gripper 5 mm higher than the final contact point. Empirically verified 2026-05-26.
+if any(abs(v) > 1e-9 for v in WAYPOINT_TOOL_CALIBRATION_M):
+    _wx, _wy, _wz = WAYPOINT_TOOL_CALIBRATION_M
+    WAYPOINTS = {
+        wp_id: (x + _wx, y + _wy, z + _wz, rx, ry, rz)
+        for wp_id, (x, y, z, rx, ry, rz) in WAYPOINTS.items()
+    }
 if DRY_RUN_CLEARANCE_M > 0.0:
     WAYPOINTS = {
         wp_id: (x, y, z + DRY_RUN_CLEARANCE_M, rx, ry, rz)
@@ -748,7 +786,8 @@ def main():
                 bid = f"box_{pair_idx:02d}"
                 box_world_at_pick = (wp_x, wp_y, wp_z, 0.0, 0.0, 0.0, 1.0)
                 n.grip(width)
-                n.attach_box_to_tcp(bid, tcp_world_pose, box_world_at_pick)
+                if not DRY_RUN_DISABLE_ATTACH:
+                    n.attach_box_to_tcp(bid, tcp_world_pose, box_world_at_pick)
             elif is_pair_open:
                 # PLACE — open gripper, detach box at the URScript place pose.
                 # Convention: box CENTROID sits AT the URScript TCP release
@@ -761,9 +800,10 @@ def main():
                 place_count += 1
                 n.grip(width)
                 bid = f"box_{pair_idx:02d}"
-                n.detach_box_at(bid,
-                                wp_x, wp_y, wp_z,
-                                tcp_qx, tcp_qy, tcp_qz, tcp_qw)
+                if not DRY_RUN_DISABLE_ATTACH:
+                    n.detach_box_at(bid,
+                                    wp_x, wp_y, wp_z,
+                                    tcp_qx, tcp_qy, tcp_qz, tcp_qw)
             else:
                 # Bookend grip (initial or final open) — no box pair
                 n.grip(width)
