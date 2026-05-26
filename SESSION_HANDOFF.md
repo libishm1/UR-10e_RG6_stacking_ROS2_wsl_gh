@@ -3,6 +3,67 @@
 Last updated: 2026-05-23. Read this first; it covers the current state and how
 to pick up where we left off.
 
+## CHECKPOINT — 2026-05-26 (at-the-cell session)
+
+**User physically at the cell, real UR10e + RG6 powered on.** Worked through
+Phases 0-4 of the validation plan; deferred Phase 5+ pending the visual
+mesh fix.
+
+### What worked
+
+- **Phase 0-2 (pre-flight + pendant + network).** All pre-existing — the
+  cell was set up from prior `D:\robot_ws` sessions. `check_real_hw_network.sh`
+  reports 7/0 pass against `192.168.1.100`.
+- **Phase 4 (read-only kinematic verification).** Installed `ur_rtde` via
+  `pip3 install --user ur_rtde`. Ran `measure_real_robot_pose.py` against
+  the real cell at HOME:
+  - Joint values match `HOME_Q = [1.5708, -1.5708, -1.5708, -1.5708, 1.5708, 1.5708]`
+    to within 0.00° — HOME is correct.
+  - TCP-in-base-frame: real = `(0.176, 0.691, 0.400)`, sim (default
+    kinematics) = `(0.001, 0.532, 1.485)` — large discrepancy.
+- **Calibration extraction.** Ran
+  `ros2 launch ur_calibration calibration_correction.launch.py robot_ip:=192.168.1.100`
+  successfully. Yaml written to
+  `src/ur10e_rg6_moveit_config/config/ur10e_cell_calibration.yaml`,
+  values match the calibrated DH from `D:\robot_ws\reference\dodectest3.urp`.
+  URDF `ur10e_rg6.urdf.xacro` now points at this yaml via
+  `kinematics_parameters_file`. Pushed as commit `db5c0c5`.
+- **Sim pickplace 10/10 with calibration applied.** Two LIN→PTP auto-retries
+  mid-run as before; no regression from calibration.
+
+### What didn't work / unresolved
+
+- **Visual mismatch in RViz vs real cell:** at HOME, real-robot's gripper
+  hangs over the cable side (manufacturer's `-X` of base_link); our URDF
+  visualization shows the gripper over `+X` (manufacturer's front). User
+  said: "poses look correct, table is correct, only the robot base itself
+  looks rotated." So **kinematics are functionally correct** (URScript
+  poses, IK, planning all working), but the **base cabinet mesh is
+  visually misoriented** relative to where the physical cabinet sits.
+  Cosmetic only — doesn't affect motion. **Open question for next step.**
+- **Direct URScript on port 30002 + `rg_grip()` CRASHED the URCap.**
+  Without the URCap preamble (only loaded when a `.urp` is playing),
+  bare URScript on the secondary client interface caused the cabinet
+  to error out and require restart. Documented as a "known issues"
+  entry in `wiki/real_hw_connection.md`. Future Claude sessions should
+  NEVER reach for this — use Path B or External-Control-Play instead.
+- **WSLg window state corruption.** After many launch/relaunch cycles
+  today, RViz windows stopped rendering ("pink window" stuck state).
+  Fix: `wsl --shutdown` from PowerShell, then reopen WSL terminal.
+  Resets all WSLg Qt/OpenGL state cleanly. After the reset, RViz
+  worked normally again.
+
+### Next session steps (still open)
+
+1. Apply visual-only base cabinet mesh fix (cosmetic) — keep kinematics
+   intact, just rotate the cabinet visualization to match the physical
+   cell orientation.
+2. Phase 5: `real_hw_smoke.py --yes --no-gripper` for the first actual
+   real-hardware arm motion at 5% speed.
+3. Phase 6: gripper smoke test via Path B (proven by the URCap crash
+   incident that bare URScript on 30002 is NOT a viable gripper path).
+4. Phases 7-9.
+
 ## CHECKPOINT — 2026-05-25 (real-hardware validation prep)
 
 **Status:** sim baseline locked. All artifacts needed to walk the cell
