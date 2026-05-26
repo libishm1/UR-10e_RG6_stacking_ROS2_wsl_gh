@@ -218,14 +218,14 @@ DRY_RUN_CLEARANCE_M = 0.0  # was 0.10 during dry run; 0.0 = full contact heights
 # follows the gripper. This isolates the "attached box collides at LIFT
 # config" hypothesis from the kinematic chain. Set to False for production
 # (we WANT the attached-box collision check during real motion).
-DRY_RUN_DISABLE_ATTACH = True  # 4 empirical tests of attach-collision: Z=+25/+45/+55mm common-mode + -5mm independent box offset, ALL fail INVALID_MOTION_PLAN at LIFT. The finger collision meshes wrap rg6_tcp tightly; only touch_links in attach_box_to_tcp can clear the legitimate gripping overlap.
+DRY_RUN_DISABLE_ATTACH = False  # active test: box attached -10 mm toward plane (floor)
 
 # Independent Z offset for the box's centroid relative to the URScript TCP
 # pose when attaching to rg6_tcp. NEGATIVE = box sits BELOW gripper TCP in
 # world (at pick orientation). 2026-05-26: tested -5mm, didn't clear collision
 # at LIFT. Larger offsets (-50mm) would clear collision but visually misplace
 # the box. Real fix is touch_links, not offset. Keeping 0.0 for now.
-BOX_ATTACH_Z_OFFSET_M = 0.0
+BOX_ATTACH_Z_OFFSET_M = +0.050  # box centroid 50 mm ABOVE gripper TCP at attach. Physically, the gripper grips the SIDE of the wood block; the block extends UPWARD from the grip line. Pre-spawn box at TCP put box centroid AT TCP, so box bottom was at TCP-15mm = touching box_05 below in the planning scene. Moving the centroid +50 mm up separates the attached box from box_05 and matches physical reality better.
 
 # WAYPOINT_TOOL_CALIBRATION_M — world-frame XYZ shift applied to every
 # waypoint X/Y/Z BEFORE sending to MoveIt. Compensates for the OnRobot
