@@ -58,7 +58,7 @@
       safety_limits="true"
       safety_pos_margin="0.15"
       safety_k_position="20"
-      kinematics_parameters_file="$(find ur_description)/config/ur10e/default_kinematics.yaml"
+      kinematics_parameters_file="$(find ur10e_rg6_moveit_config)/config/ur10e_cell_calibration.yaml"
       joint_limits_parameters_file="$(find ur_description)/config/ur10e/joint_limits.yaml"
       physical_parameters_file="$(find ur_description)/config/ur10e/physical_parameters.yaml"
       visual_parameters_file="$(find ur_description)/config/ur10e/visual_parameters.yaml"
