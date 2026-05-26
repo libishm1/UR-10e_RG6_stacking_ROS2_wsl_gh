@@ -218,7 +218,14 @@ DRY_RUN_CLEARANCE_M = 0.0  # was 0.10 during dry run; 0.0 = full contact heights
 # follows the gripper. This isolates the "attached box collides at LIFT
 # config" hypothesis from the kinematic chain. Set to False for production
 # (we WANT the attached-box collision check during real motion).
-DRY_RUN_DISABLE_ATTACH = True  # 2026-05-26: tested False with +45mm Z calibration — LIFT still fails INVALID_MOTION_PLAN. The Z shift is common-mode (moves waypoints AND attached box together), so relative geometry vs gripper finger meshes is unchanged. Real fix is touch_links in attach_box_to_tcp.
+DRY_RUN_DISABLE_ATTACH = True  # 2026-05-26 tests 1+2: tried with attach=False + common-mode Z=+45mm AND with INDEPENDENT BOX_ATTACH_Z_OFFSET_M=-5mm. Both still fail INVALID_MOTION_PLAN at LIFT. The finger collision meshes wrap the rg6_tcp grasp point too tightly for any small offset to clear; touch_links is the actual fix.
+
+# Independent Z offset for the box's centroid relative to the URScript TCP
+# pose when attaching to rg6_tcp. NEGATIVE = box sits BELOW gripper TCP in
+# world (at pick orientation). 2026-05-26: tested -5mm, didn't clear collision
+# at LIFT. Larger offsets (-50mm) would clear collision but visually misplace
+# the box. Real fix is touch_links, not offset. Keeping 0.0 for now.
+BOX_ATTACH_Z_OFFSET_M = 0.0
 
 # WAYPOINT_TOOL_CALIBRATION_M — world-frame XYZ shift applied to every
 # waypoint X/Y/Z BEFORE sending to MoveIt. Compensates for the OnRobot
@@ -784,7 +791,7 @@ def main():
                 pair_idx = pick_count
                 pick_count += 1
                 bid = f"box_{pair_idx:02d}"
-                box_world_at_pick = (wp_x, wp_y, wp_z, 0.0, 0.0, 0.0, 1.0)
+                box_world_at_pick = (wp_x, wp_y, wp_z + BOX_ATTACH_Z_OFFSET_M, 0.0, 0.0, 0.0, 1.0)
                 n.grip(width)
                 if not DRY_RUN_DISABLE_ATTACH:
                     n.attach_box_to_tcp(bid, tcp_world_pose, box_world_at_pick)
