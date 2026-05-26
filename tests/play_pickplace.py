@@ -734,11 +734,14 @@ def main():
     PICK_WP_IDS = [2, 10, 18, 26, 34,        # pass 1: top boxes
                    42, 50, 58, 66, 74]       # pass 2: bottom boxes
     print(f"[boxes] pre-spawning {len(PICK_WP_IDS)} boxes at pick positions")
+    _cx, _cy, _cz = WAYPOINT_TOOL_CALIBRATION_M
     for pair_idx, wp_id in enumerate(PICK_WP_IDS):
         wp_x, wp_y, wp_z, _, _, _ = WAYPOINTS[wp_id]
-        # Centroid AT the URScript TCP pose for this pick waypoint.
+        # Centroid at the UN-shifted URScript TCP pose for this pick waypoint —
+        # subtract the calibration so the box visualises where it physically
+        # rests (on the pedestal / lower stack), not at the shifted gripper Z.
         n.add_box_world(f"box_{pair_idx:02d}",
-                        wp_x, wp_y, wp_z,
+                        wp_x - _cx, wp_y - _cy, wp_z - _cz,
                         0.0, 0.0, 0.0, 1.0)
     time.sleep(1.0)
     # NOTE: deliberately NOT publishing an AllowedCollisionMatrix here.
@@ -808,8 +811,18 @@ def main():
                 n.grip(width)
                 bid = f"box_{pair_idx:02d}"
                 if not DRY_RUN_DISABLE_ATTACH:
+                    # SETTLE: subtract WAYPOINT_TOOL_CALIBRATION_M to place the
+                    # box at its un-shifted URScript world position — i.e., where
+                    # the physical block actually rests on the pedestal / stack.
+                    # The calibration shift is applied to MoveIt targets (gripper
+                    # TCP) to compensate the URCap calibration error, but the
+                    # PHYSICAL block ends up at the original URScript coordinates.
+                    _cx, _cy, _cz = WAYPOINT_TOOL_CALIBRATION_M
+                    settle_x = wp_x - _cx
+                    settle_y = wp_y - _cy
+                    settle_z = wp_z - _cz
                     n.detach_box_at(bid,
-                                    wp_x, wp_y, wp_z,
+                                    settle_x, settle_y, settle_z,
                                     tcp_qx, tcp_qy, tcp_qz, tcp_qw)
             else:
                 # Bookend grip (initial or final open) — no box pair
