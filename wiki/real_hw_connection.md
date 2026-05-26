@@ -131,6 +131,38 @@ plus the URCap-on-pendant is the only chain that has to exist.
 
 ## Known issues
 
+### Bare URScript on port 30002 + URCap functions: CABINET CRASH
+
+**Verified 2026-05-26:** sending a single-line `rg_grip(width, force)`
+via a raw TCP socket to `192.168.1.100:30002` (no URCap preamble loaded)
+**caused a URCap error and forced a cabinet restart.** The cabinet had
+just booted and the OnRobot URCap had enumerated the gripper cleanly
+(pendant Date Log: `OnRobot Devices: Quick Changer + RG6 + [0.0, ...]`),
+but the first ad-hoc `rg_grip` send corrupted URCap state.
+
+Previously (per D:\robot_ws notes) this was described as "silently
+ignored." The 2026-05-26 observation is stronger: it can actively
+break the URCap session.
+
+**Rule:** never send `rg_grip()` (or any other URCap-defined function)
+through a path that doesn't have the URCap preamble loaded. The URCap
+preamble is injected by PolyScope only when a `.urp` is loaded. The
+safe paths are:
+
+1. **Path B** (recommended for ROS-free testing): SFTP+Dashboard deploy
+   a `.urp`+`.script` pair. See [`path_b_vs_ros_driver.md`](path_b_vs_ros_driver.md)
+   and `D:\robot_ws\robots\outputs\2026-05-10\path_b\urp_deploy.py`.
+2. **ROS driver path**: load `external_control.urp` on the pendant,
+   press **Play**, then use `/urscript_interface/script_command`. The
+   driver forwards via port 30002 but PolyScope is now in a program
+   context that has the URCap preamble loaded, so `rg_grip()` resolves.
+
+**Never** open a raw socket to 30002 and send `rg_grip` lines without
+one of the above contexts loaded. The cabinet will likely error and
+need a restart.
+
+
+
 - **URScript topic stops the External Control program when the message
   is a wrapped `def...end` program.** Single-line statements (like our
   `rg_grip(...)`) are sent as "secondary programs" and do NOT
