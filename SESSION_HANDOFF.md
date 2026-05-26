@@ -3,6 +3,89 @@
 Last updated: 2026-05-26 (evening). Read this first; it covers the current state and how
 to pick up where we left off.
 
+## CHECKPOINT — 2026-05-27 (end of overnight session — sim pickplace FULLY LANDED, real-hw motion VERIFIED, gripper engagement only remaining blocker)
+
+10 commits pushed to GitHub `main` between yesterday evening and this morning. `git log --oneline -10` from `8ec790a` back to `10b1a85` shows the full arc.
+
+### What's verified ON REAL HARDWARE today
+
+| Item | Status |
+|---|---|
+| URDF↔cabinet kinematics agree to 0.4 mm | ✅ at HOME AND extreme freedrive |
+| External Control URCap installed + configured | ✅ on cabinet `/root/.urcaps/` |
+| Windows Firewall inbound 50001-50004 from cabinet | ✅ |
+| First real arm motion under ROS 2 (direct trajectory) | ✅ |
+| Full pickplace cycle motion only (no real grip) | ✅ 56 s, 9 motion steps, no failures |
+| Pick approach + descent X/Y/Z alignment with wood block | ✅ at gripper-down orientation |
+| OnRobot URCap X/Y calibration `(−6.66, +10.52)` mm | ✅ |
+| OnRobot URCap Z calibration `+45 mm` | ✅ (RG6 fingers pivot down on close) |
+
+### What's verified ONLY IN SIMULATION (real-hw test still TODO)
+
+| Item | Status |
+|---|---|
+| `play_pickplace.py --max 4` with attach=True | ✅ 2 full pick+place cycles in 78 s |
+| Box attach with centroid +50 mm above TCP (geometric fix) | ✅ no LIFT collision |
+| Box settle visualisation (pre-spawn + detach at un-shifted Z) | ✅ |
+| Calibration value `+45 mm` validity at PLACE orientation | ⚠️ same tool-frame error, different wrist rotation → different world-frame manifestation; **tomorrow's hardware test will reveal** |
+
+### What's NOT yet tested (next-session work)
+
+| Item | Status |
+|---|---|
+| `--real-gripper` actually closing on the wood block | ⚠️ URScript-via-topic doesn't reach OnRobot URCap (PolyScope architectural limit, empirically confirmed by URP rebuild test); **Tool I/O fix designed but not yet implemented** |
+| Full real-hw pickplace with gripper | ⚠️ blocked by gripper engagement |
+| 20-cycle full stack (sim or real) | ⚠️ |
+| Place X/Y/Z calibration on real hardware | ⚠️ |
+
+### The breakthrough insights of this session
+
+1. **URDF kinematic fix** — two-line edit (`ur_macro.xacro:350` `rpy="0 0 ${pi}"` → `rpy="0 0 0"`, `ur_macro.xacro:364` `<axis xyz="0 0 -1" />` → `<axis xyz="0 0 1" />`). The 180° base yaw + my earlier shoulder_pan axis flip were canceling at HOME by symmetry but creating a 180°-class mirror at all other poses. Removed both: URDF FK now matches cabinet RTDE TCP within 0.4 mm at any pose. **Real-hw verified at HOME + extreme freedrive pose.**
+
+2. **OnRobot URCap is a GUI wrapper, NOT the gripper driver.** The reference `onrobot1_ros/onrobot_interface/src/onrobot_gripper.cpp` controls the gripper via `/io_and_status_controller/set_io` — tool digital pin 16 + analog tool voltage. The URCap's `rg_grip()` is a PolyScope program-tree node that calls into URCap Java; it's NOT a URScript function that can be triggered from External Control's socket. The 2026-05-24 "Mechanism C" decision was based on wrong premise; now superseded by Tool I/O lock-in in `wiki/decisions.md`.
+
+3. **Operator's geometric insight** for the attach collision: the planning-scene box was being attached centroid-AT-TCP, but the physical block extends UPWARD from the grip line. Moving the attached centroid `+50 mm` above the TCP both clears the box-vs-lower-stack-box collision AND visually matches reality. Sim pickplace immediately worked after this fix.
+
+### Files modified this session (all committed and pushed)
+
+- `src/Universal_Robots_ROS2_Description/urdf/ur_macro.xacro` — kinematic fix (whitelisted in `.gitignore`)
+- `src/Universal_Robots_ROS2_Description/urdf/ur10e_rg6.urdf.xacro` — rg6_tcp 0.190 → 0.228 m
+- `src/ur10e_rg6_moveit_config/launch/move_group.launch.py` — `execution_duration_monitoring: False`, larger scaling
+- `src/ur10e_rg6_moveit_config/config/ur10e_rg6.srdf` + `initial_positions.yaml` — HOME values
+- `tests/play_pickplace.py` — `WAYPOINT_TOOL_CALIBRATION_M = (-0.00666, +0.01052, +0.045)`, `BOX_ATTACH_Z_OFFSET_M = +0.050`, `DRY_RUN_DISABLE_ATTACH = True`, detach + pre-spawn use un-shifted positions
+- `tests/real_hw_smoke.py` — HOME comment updates
+- `calibration/` directory created — `cabinet_calibration.conf`, `fk_experiment.py`, `apply_calibration_quaternion.py` stub, `reapply_driver_patches.sh`, `urp/external_control_with_onrobot_node.urp`, `README.md`
+- `wiki/decisions.md` — 2026-05-26 entry SUPERSEDES the 2026-05-24 Mechanism C
+- `wiki/shoulder_pan_sign_mismatch.md` — resolution section
+- `wiki/known_bugs_and_workarounds.md` — multiple new entries
+
+### Next-session plan (~1.5-2 h)
+
+1. **Tool I/O grip helper** (~30 min): replace URScript-topic grip with `/io_and_status_controller/set_io` service calls (digital out pin 16). Pattern in `onrobot_interface/src/onrobot_gripper.cpp` — port to a small Python helper in `tests/onrobot_io_grip.py`. Wire into `play_pickplace.py`'s `--real-gripper` path.
+2. **SRDF tip_link `tool0 → ee_link`** (~30 min): eliminates the `WAYPOINT_TOOL_CALIBRATION_M` shift entirely. MoveIt plans for the grasp point directly. After rebuild, all calibration becomes irrelevant and the pick-vs-place orientation ambiguity disappears.
+3. **Real-hw 1-cycle pickplace with --real-gripper** (~20 min): verify grip closes on the wood block, lifts, places at destination, releases.
+4. **Real-hw 2-cycle** (~20 min): verify the second pick after first place.
+5. **Real-hw 20-cycle full stack** (~30 min wall-clock at the ~50 s/cycle observed today, more if WSL2 RTDE jitter): full production validation.
+
+### Helper scripts in `/tmp/` (regenerated each WSL session — `wsl --shutdown` wipes them)
+
+- `/tmp/kill_ros.sh` — kill all ROS launches cleanly (patterns in file, not argv → no self-kill)
+- `/tmp/launch_sim.sh`, `/tmp/launch_real.sh` — stack launchers
+- `/tmp/peek_joint_states.py` — direct rclpy subscriber (CLI hangs in WSL2)
+- `/tmp/tcp_compare.py` — read-only diagnostic: cabinet RTDE TCP vs URDF FK
+- `/tmp/switch_controllers.py` — re-activates `scaled_joint_trajectory_controller` when controller_stopper misses URP-start
+- `/tmp/send_grip.py` — publishes `rg_grip(w,f)` URScript to topic (currently silently no-ops — see Tool I/O fix)
+- `/tmp/direct_trajectory_smoke.py` — bypass MoveIt, send direct joint trajectory
+- `/tmp/check_ext_control.sh`, `/tmp/verify_ext_control.sh` — dashboard probes
+
+If `wsl --shutdown` happened between sessions, regenerate via Write tool. See `calibration/README.md` for full list and contents.
+
+### Final pendant state at end of session
+
+URP was PLAYING (`external_control.urp` with OnRobot RG node above External Control), Remote Control on. Cabinet RUNNING/NORMAL. **Tomorrow morning's first action:** check if pendant is still in this state OR power-cycle + redo the URP load + Play sequence per the SESSION_HANDOFF entries above.
+
+---
+
 ## CHECKPOINT — 2026-05-26 (very late evening — URDF KINEMATIC FIX VERIFIED on real hardware)
 
 🎯 **Real cabinet ↔ URDF FK now match to 0.4 mm at every measured pose.** From 705 mm error at extreme pose to **0.4 mm** — a 1700× improvement on a two-line edit in `ur_macro.xacro`.
