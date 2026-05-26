@@ -110,7 +110,13 @@ ARM_GROUP = "ur_manipulator"
 
 # THE user-verified HOME. Same vector used in SRDF home group_state,
 # initial_positions.yaml, and play_pickplace.py HOME_Q. Do not change.
-HOME_Q = [1.5708, -1.5708, -1.5708, -1.5708, 1.5708, 1.5708]
+HOME_Q = [-1.5708, -1.5708, -1.5708, -1.5708, 1.5708, 1.5708]
+# NOTE 2026-05-26: shoulder_pan = -pi/2 (not +pi/2) so the URDF sim
+# matches the physical cell at HOME. URDF and real cabinet have opposite
+# shoulder_pan axis convention. For REAL hardware: this HOME_Q sent to the
+# cabinet will rotate the arm to the OPPOSITE side from the operator's
+# known +pi/2 HOME. Either re-teach the cabinet's HOME to -pi/2, OR
+# substitute +pi/2 here when commanding the real robot.
 
 # Hard caps. Even if --delta-rad is set higher, the script refuses to
 # exceed these. Each cap is intentionally below the joint limits with

@@ -1,5 +1,9 @@
 initial_positions:
-  shoulder_pan_joint:   1.5708
+  # NOTE 2026-05-26: shoulder_pan flipped to -pi/2 (from +pi/2) so URDF sim
+  # matches the physical cell at HOME. The URDF and real cabinet have
+  # opposite shoulder_pan_joint axis convention — same numerical value
+  # produces opposite physical direction. Sim-only fix.
+  shoulder_pan_joint:  -1.5708
   shoulder_lift_joint: -1.5708
   elbow_joint:         -1.5708
   wrist_1_joint:       -1.5708

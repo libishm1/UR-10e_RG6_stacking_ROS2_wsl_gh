@@ -46,8 +46,15 @@
   </group>
 
   <!-- ============ Named states ============ -->
+  <!-- HOME state for SIMULATION ONLY.
+       NOTE 2026-05-26: shoulder_pan flipped to -pi/2 (from +pi/2) so the URDF
+       visualization matches the physical cell at HOME. The real cabinet's
+       controller has shoulder_pan_joint axis convention OPPOSITE from our URDF
+       — same numerical value produces opposite physical direction. URScript
+       HOME on the real robot is +pi/2; ours is -pi/2 here. Do not send this
+       group_state to the real robot — it will go to the wrong side. -->
   <group_state name="home" group="ur_manipulator">
-    <joint name="shoulder_pan_joint"  value="1.5708"/>
+    <joint name="shoulder_pan_joint"  value="-1.5708"/>
     <joint name="shoulder_lift_joint" value="-1.5708"/>
     <joint name="elbow_joint"         value="-1.5708"/>
     <joint name="wrist_1_joint"       value="-1.5708"/>

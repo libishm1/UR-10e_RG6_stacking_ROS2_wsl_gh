@@ -31,12 +31,17 @@ let it die in a chat transcript.
 - [RViz GPU rendering under WSL2](rviz_gpu_rendering.md) — verified
   D3D12 passthrough via WSLg to Intel UHD 630. How to confirm,
   what to do if you ever see `llvmpipe` fallback.
-- [RViz visual orientation mismatch (unresolved)](rviz_visual_orientation_mismatch.md) —
-  documented: RViz arm at HOME extends in opposite direction from real
-  cell. Calibration extraction + URDF base rotation + visual mesh
-  rotation all tried, none fix it. Doesn't affect real-hardware
-  motion (controller uses its own calibration). Accept as known
-  cosmetic limitation.
+- [RViz visual orientation mismatch (early attempts)](rviz_visual_orientation_mismatch.md) —
+  full attempt log: calibration extraction, URDF base rotation, mesh
+  rotation. **Superseded** by the shoulder-pan sign-flip finding.
+- [Shoulder-pan sign mismatch (FIX FOUND)](shoulder_pan_sign_mismatch.md) —
+  URDF and cabinet use opposite shoulder_pan_joint sign convention. Flip
+  HOME_Q[0] to -pi/2 → RViz matches real cell. **Critical caveat for
+  real hardware:** sending -pi/2 to real cabinet sends arm to the
+  wrong side; needs care during Phase 5+ deployment.
+- [Known bugs and workarounds (catalog)](known_bugs_and_workarounds.md) —
+  living index of every "burnt by this" from the workspace. Future
+  Claude sessions: search here first before re-discovering.
 - [WSL2 networking deep-dive](../docs/WSL2_UR10e_NETWORKING.md) — fallback
   ladder (mirrored → bridged → NAT+portproxy → native Linux). Lives outside
   the wiki because it's a setup guide users follow step-by-step.

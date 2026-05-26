@@ -3,6 +3,84 @@
 Last updated: 2026-05-23. Read this first; it covers the current state and how
 to pick up where we left off.
 
+## CHECKPOINT — 2026-05-26 (late afternoon — SHOULDER-PAN SIGN FIX FOUND, real-HW deployment caveat documented)
+
+**🎯 Visual orientation FIXED in sim.** After more iteration, the root cause
+turned out to be a **shoulder_pan sign mismatch** between URDF and real
+cabinet: same joint value produces opposite physical direction.
+
+> **⚠ UNVERIFIED ON REAL HARDWARE.** The fix is locked in sim only. The
+> hypothesis (URDF vs cabinet axis convention is opposite) has NOT been
+> tested on real hardware yet. Before any real-hw motion via our
+> scripts, run the verification plan in
+> [`wiki/shoulder_pan_sign_mismatch.md`](wiki/shoulder_pan_sign_mismatch.md)
+> § "UNVERIFIED ON REAL HARDWARE". Sending our `-pi/2` HOME_Q to the
+> real cabinet could move the arm to the WRONG side at startup.
+
+### The fix
+
+Change `shoulder_pan_joint` from `+1.5708` to `-1.5708` in HOME:
+- `tests/play_pickplace.py` HOME_Q
+- `tests/real_hw_smoke.py` HOME_Q
+- `config/ur10e_rg6.srdf` `home` group_state
+- `config/initial_positions.yaml`
+
+Sim pickplace 10/10 with the new value, RViz visual now matches the
+physical cell at HOME. **Locked.**
+
+Full details: [`wiki/shoulder_pan_sign_mismatch.md`](wiki/shoulder_pan_sign_mismatch.md).
+
+### Critical caveat for real hardware deployment
+
+**Sim and real cabinet now use OPPOSITE shoulder_pan values for the
+same physical HOME pose.** Operator-known HOME on the real cabinet
+uses `+pi/2`; our scripts use `-pi/2` for sim correctness. Sending
+our `-pi/2` to the real robot will rotate the arm AWAY from the work
+area (the OPPOSITE side from real HOME).
+
+**Three options for Phase 5+ real-hardware deployment:**
+
+1. **Re-teach the cabinet HOME** to `[-pi/2, -pi/2, -pi/2, -pi/2, pi/2, pi/2]`
+   — operator adopts new convention, scripts work in both sim and real
+2. **Sign-flip at the driver boundary** — keep `-pi/2` in scripts for
+   sim, programmatically negate shoulder_pan before sending to the
+   real driver. Adds complexity but preserves visualization.
+3. **Investigate / fix the URDF axis convention** — proper but deeper
+   work; would need digging into shoulder_pan_joint axis in `ur_macro.xacro`
+
+Decision: TBD. Document in [`shoulder_pan_sign_mismatch.md`](wiki/shoulder_pan_sign_mismatch.md).
+
+### New documentation
+
+- [`wiki/shoulder_pan_sign_mismatch.md`](wiki/shoulder_pan_sign_mismatch.md)
+  — the fix, the caveat, the deployment options
+- [`wiki/known_bugs_and_workarounds.md`](wiki/known_bugs_and_workarounds.md)
+  — consolidated catalog of all session bugs + workarounds:
+  - Shoulder-pan sign mismatch (this one)
+  - Bare URScript on 30002 crashing URCap
+  - WSLg pink-window after many launches
+  - Dual RViz spawn
+  - mock_components initial_positions parsing warning
+  - WSL2 NAT vs UR reverse interface
+  - OnRobot URCap cold-boot quirk
+  - pickplace LIN→PTP retry noise
+  - Calibration extraction doesn't fix the 1m+ TCP-Z mismatch
+
+### Phase 5 prerequisites (NEW — must verify before real-hw motion)
+
+Per `D:\robot_ws\reference\deep-research-wsl2_networking.md`:
+
+1. **Confirm WSL2 mirrored mode** is active: `cat ~/.wslconfig` shows
+   `networkingMode=Mirrored` ✅ (current state)
+2. **Set Windows firewall** for inbound + outbound TCP 50001-50003 from
+   the cabinet's IP (192.168.1.100). One-time PowerShell admin command.
+3. **Verify `reverse_ip` parameter** in the UR driver is the Windows
+   host LAN IP (192.168.1.35), NOT auto-detected. **Likely TODO.**
+4. **Set `keepalive_count` / `robot_receive_timeout`** in the driver
+   YAML (default may drop connections too aggressively).
+5. **Decide shoulder_pan deployment strategy** (per the 3 options above)
+   before sending any motion command to the real robot.
+
 ## CHECKPOINT — 2026-05-26 (afternoon — RViz visual mismatch closed as cosmetic)
 
 User at the cell. After extensive attempts to make RViz visually match the
