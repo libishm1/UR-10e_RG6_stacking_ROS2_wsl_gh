@@ -218,7 +218,7 @@ DRY_RUN_CLEARANCE_M = 0.0  # was 0.10 during dry run; 0.0 = full contact heights
 # follows the gripper. This isolates the "attached box collides at LIFT
 # config" hypothesis from the kinematic chain. Set to False for production
 # (we WANT the attached-box collision check during real motion).
-DRY_RUN_DISABLE_ATTACH = True  # 2026-05-26 tests 1+2: tried with attach=False + common-mode Z=+45mm AND with INDEPENDENT BOX_ATTACH_Z_OFFSET_M=-5mm. Both still fail INVALID_MOTION_PLAN at LIFT. The finger collision meshes wrap the rg6_tcp grasp point too tightly for any small offset to clear; touch_links is the actual fix.
+DRY_RUN_DISABLE_ATTACH = True  # 2026-05-26 three empirical tests of attach-collision: Z=+45mm common-mode ❌, -5mm independent box offset ❌, Z=+55mm common-mode ❌. All fail INVALID_MOTION_PLAN at LIFT. Common-mode shifts preserve relative geometry; small relative offset doesn't clear finger mesh envelope. Real fix is touch_links in attach_box_to_tcp — next session.
 
 # Independent Z offset for the box's centroid relative to the URScript TCP
 # pose when attaching to rg6_tcp. NEGATIVE = box sits BELOW gripper TCP in
@@ -249,7 +249,7 @@ BOX_ATTACH_Z_OFFSET_M = 0.0
 # see the SAME tool-frame calibration error manifest as a DIFFERENT world-
 # frame offset. For per-pose correctness use Option 1 (set_tcp via URScript)
 # or fix OnRobot_Single via the OnRobot URCap settings page if available.
-WAYPOINT_TOOL_CALIBRATION_M = (-0.00666, +0.01052, +0.045)  # X/Y verified mm-level @ gripper-down (R_y(180°)). Z = +45 mm: URCap set_tcp defines TCP at the OPEN finger center; when the RG6 fingers close they pivot inward and slightly DOWN, so we command the open gripper 5 mm higher than the final contact point. Empirically verified 2026-05-26.
+WAYPOINT_TOOL_CALIBRATION_M = (-0.00666, +0.01052, +0.045)  # X/Y verified mm-level @ gripper-down (R_y(180°)). Z = +45 mm: URCap set_tcp defines TCP at the OPEN finger center; RG6 fingers pivot inward + slightly DOWN on close, so command open gripper 5 mm higher than final contact point. Empirically verified on real hw 2026-05-26.
 if any(abs(v) > 1e-9 for v in WAYPOINT_TOOL_CALIBRATION_M):
     _wx, _wy, _wz = WAYPOINT_TOOL_CALIBRATION_M
     WAYPOINTS = {
