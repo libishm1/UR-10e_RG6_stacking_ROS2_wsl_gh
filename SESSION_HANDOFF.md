@@ -241,7 +241,28 @@ has executed end-to-end on real hardware under ROS 2 control.
 
 ### Known issues still open after this session
 
-1. **`rg_grip()` URScript-via-topic doesn't engage the OnRobot URCap.**
+1. **`rg_grip()` URScript-via-topic doesn't engage the OnRobot URCap —
+   CONFIRMED as a PolyScope architectural limitation, not a config bug.**
+
+   We rebuilt `external_control.urp` on the pendant with the OnRobot RG node
+   FIRST in MainProgram and External Control SECOND (verified by SSHing
+   `/programs/external_control.urp` from the cabinet and decompressing the
+   gzipped XML — see `calibration/urp/external_control_with_onrobot_node.urp`).
+   The OnRobot RG node DOES execute at URP start (gripper moves to its
+   configured width — `0.09 m / 80 N` in our saved URP). BUT subsequent
+   `rg_grip(...)` strings sent via `/urscript_interface/script_command` do
+   NOT engage the gripper. Silent no-op.
+
+   Root cause: OnRobot URCap's `rg_grip` etc. live in a **Java-backed
+   namespace** tied to its own program-node execution path. When PolyScope
+   evaluates URScript text arriving on the External Control socket, it uses
+   an interpretation context that does not include those Java-bound URCap
+   functions. They appear "global" inside an OnRobot URCap node's own
+   scope but aren't reachable from arbitrary URScript text injection.
+
+   This means: the "OnRobot node above External Control" structure
+   cannot fix the gripper-via-topic issue from ROS-side configuration alone.
+
    Our `external_control.urp` is the bare External Control URCap node only;
    it doesn't include the OnRobot URCap node, so the URCap's URScript
    preamble (defining `rg_grip()`, `rg_payload_set()`, etc.) is not
