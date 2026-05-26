@@ -10,7 +10,86 @@ Pattern borrowed from `D:\robot_ws\robots\wiki\project_management\decisions.md`.
 
 ---
 
-## 2026-05-24 — RG6 real-hardware control: Mechanism C (URScript topic)
+## 2026-05-26 (very late evening) — RG6 real-hardware control: REVERSED to Mechanism A/B (Tool I/O), NOT Mechanism C
+
+**Decision.** Use **Tool digital I/O** for real-hardware gripper control —
+the same approach the upstream `inria-paris-robotics-lab/onrobot_ros`
+reference repo takes. Either:
+
+- **Mechanism A** (preferred long-term): the `onrobot_interface` C++
+  `ros2_control` hardware-interface plugin, BUT fix the URDF
+  `<ros2_control name="OnRobotRG6System">` block to satisfy the
+  plugin's `<param name="prefix">` and `<param name="model">`
+  requirements that crashed it earlier
+  ([known_bugs](known_bugs_and_workarounds.md#onrobot_interface-c-plugin-crashes-on-init--never-use-it)
+  has the previous crash trace).
+- **Mechanism B**: the `onrobot_driver` Python node — runs as a
+  separate ROS node, subscribes to `/io_and_status_controller/io_states`,
+  offers higher-level `grip(width, force)` services. No URDF changes.
+- **Roll-our-own minimal**: a 30-line ROS helper that directly calls
+  `/io_and_status_controller/set_io` to set pin 16 + reads pin 17 +
+  optionally writes the analog tool voltage. Bypasses both plugin and
+  separate driver.
+
+**Why this reverses the 2026-05-24 decision (below):**
+
+The 2026-05-24 decision picked Mechanism C (URScript topic) because A
+and B were thought to be "binary open/close only". This turns out to
+be **wrong** — A and B both use the OnRobot tool I/O analog voltage
+channel (0-3 V for RG6 v1, 0-10 V for RG6 v2) for continuous width
+control. The reference plugin source
+([`onrobot_gripper.cpp`](../src/onrobot1_ros/onrobot_interface/src/onrobot_gripper.cpp))
+shows this directly:
+
+```cpp
+int PIN_GRIPPER_CONTROL = 16;   // tool digital out  → command
+int PIN_GRIPPER_STATE   = 17;   // tool digital in   → state
+float DEFAULT_MAX_POSITION_VOLTAGE_RG6_V2 = 10.0;  // analog → width
+```
+
+It's not binary; it's continuous via the analog voltage rail.
+
+Mechanism C (URScript topic `rg_grip(...)`) is **architecturally
+unworkable from External Control's URScript-topic context.** Verified
+2026-05-26 by:
+
+1. Rebuilding `external_control.urp` on the pendant with an OnRobot RG
+   node FIRST in MainProgram, External Control SECOND (the URP file is
+   saved at `calibration/urp/external_control_with_onrobot_node.urp`).
+2. Confirmed via SSH that the OnRobot URCap node DOES execute at URP
+   start (gripper moves to its configured width during program load).
+3. But `rg_grip(50, 20)` sent via `/urscript_interface/script_command`
+   STILL silently no-ops — the OnRobot URCap's `rg_grip` lives in a
+   Java-backed namespace tied to its own program-node execution; it's
+   not reachable from URScript text arriving on the External Control
+   socket.
+
+So C requires either Path B URP-load-per-grip (slow, brittle) or
+rebuilding URPs server-side (complex). Tool I/O sidesteps the entire
+URCap. PolyScope just routes the tool pins to the gripper MCU — no
+URCap, URScript, or URP machinery in between.
+
+**Implications.**
+
+- The `<plugin>mock_components/GenericSystem</plugin>` we're using for
+  `OnRobotRG6System` in `ur10e_rg6.urdf.xacro` should EVENTUALLY be
+  reverted to `<plugin>onrobot_interface/OnRobotHardwareInterface</plugin>`
+  with the proper params, OR we go with Mechanism B (independent node)
+  and keep mock_components.
+- The `--real-gripper` flag in `play_pickplace.py` currently publishes
+  to `/urscript_interface/script_command`. This needs to be replaced
+  with a call to `/io_and_status_controller/set_io` (for Mechanism A/B/own).
+- The `WAYPOINT_TOOL_CALIBRATION_M` X/Y shift we measured is
+  **independent** of the gripper control mechanism — it's a TCP-frame
+  calibration. Stays valid.
+
+**Reference implementation to crib from.**
+[`src/onrobot1_ros/onrobot_interface/src/onrobot_gripper.cpp`](../src/onrobot1_ros/onrobot_interface/src/onrobot_gripper.cpp).
+The proven gripper-via-tool-I/O code path on this exact hardware family.
+
+---
+
+## 2026-05-24 — RG6 real-hardware control: Mechanism C (URScript topic) — SUPERSEDED 2026-05-26
 
 **Decision.** For real-hardware gripper control, use **Mechanism C**:
 publish single-line `rg_grip(width_mm, force_N, ...)` URScript to
@@ -71,4 +150,4 @@ for the full A/B/C comparison and the code citations.
 
 ## Last updated
 
-2026-05-24.
+2026-05-26 (very late evening — RG6 decision reversed; Tool I/O is the answer).

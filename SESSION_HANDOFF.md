@@ -310,6 +310,75 @@ has executed end-to-end on real hardware under ROS 2 control.
    miscalibrated by some millimeters in a different direction than
    pick positions.
 
+### 🎯 BIG FINDING — gripper control via OnRobot Tool I/O (NOT URCap)
+
+After the URP-rebuild dead end (above), investigated how the reference
+repo `inria-paris-robotics-lab/onrobot_ros` actually controls the
+gripper — turns out **the entire OnRobot URCap rabbit-hole was the
+wrong rabbit-hole**.
+
+The reference `onrobot_interface/src/onrobot_gripper.cpp` does:
+
+```cpp
+this->_set_io = create_client<ur_msgs::srv::SetIO>(
+    "/io_and_status_controller/set_io");
+this->_states_io_sub = create_subscription<ur_msgs::msg::IOStates>(
+    "/io_and_status_controller/io_states", ...);
+int PIN_GRIPPER_CONTROL = 16;   // tool digital OUT
+int PIN_GRIPPER_STATE   = 17;   // tool digital IN
+float DEFAULT_MAX_POSITION_VOLTAGE_RG6_V2 = 10.0;  // analog → width
+```
+
+**The OnRobot Quick Changer routes the UR cabinet's tool I/O pins
+directly to the gripper's internal MCU.** No URCap, URScript, or URP
+machinery in between. PolyScope just provides the tool I/O
+infrastructure (digital out/in + analog tool voltage), and the gripper
+MCU interprets the levels. The OnRobot URCap is a GUI wrapper around
+the same I/O — not a required driver.
+
+This means our REAL fix path for gripper-via-ROS is:
+
+1. **Use the `/io_and_status_controller/set_io` service** (already
+   exposed by ur_robot_driver as part of the io_and_status_controller
+   we already have running). Drive pin 16, read pin 17, set analog
+   voltage for fine width.
+2. **No URCap, no URP rebuild, no URScript preamble extraction**
+   needed. The "build URP with OnRobot RG node" experiment we just
+   did was solving the wrong problem.
+3. The reference `onrobot_interface` C++ plugin we rejected earlier
+   (it crashed with `Un seul joint doit être défini`) is itself just
+   a wrapper around this set_io approach. Fixing the URDF's
+   ros2_control block to satisfy its `prefix`+`model` params would
+   let it load cleanly.
+
+`wiki/decisions.md` has been updated — the 2026-05-24 Mechanism-C
+decision is REVERSED. The new locked decision is Tool I/O (via plugin
+or independent node or roll-our-own — all three approaches share the
+same set_io transport).
+
+### Next session — concrete plan based on Tool I/O finding
+
+1. **(~30 min) Build a minimal grip helper** that wraps
+   `/io_and_status_controller/set_io` calls. Map width-mm to
+   analog tool voltage (0-3 V or 0-10 V depending on RG6 v1/v2).
+   Replace the URScript topic publisher in `play_pickplace.py`'s
+   `--real-gripper` path with this helper.
+2. **(~15 min) Test** — `play_pickplace.py --max 2 --real-gripper`.
+   Expect the gripper to actually engage on the wood block this
+   time. NO pendant changes needed beyond running External Control
+   URP for arm motion.
+3. **(~30 min) Switch SRDF tip_link** from `tool0` to `ee_link` so
+   MoveIt plans for the actual grip point. Removes the orientation-
+   dependent X/Y calibration hack in `WAYPOINT_TOOL_CALIBRATION_M`
+   (the +6.66/+10.52 shift was only correct at gripper-down).
+4. **(~15 min) Fix touch_links** in `attach_box_to_tcp` and re-enable
+   `DRY_RUN_DISABLE_ATTACH = False` for production attach behavior.
+5. Then `play_pickplace.py --max 20 --real-gripper` should produce
+   the full 10-box pick-and-place sequence on real hardware.
+
+**Total ~1.5 hours of code + test next session to close out the
+gripper engagement story.**
+
 ### Architectural pivot — URP-driven motion (deferred but documented)
 
 User's insight: instead of replicating the cabinet's OnRobot URCap +
