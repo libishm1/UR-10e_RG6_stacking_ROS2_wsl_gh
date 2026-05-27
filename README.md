@@ -6,26 +6,54 @@ simulation with visualised box stacking.
 
 <img width="800" height="600" alt="ros_resized" src="https://github.com/user-attachments/assets/e9eb7a84-4d89-4c94-bcba-aea8f4069cce" />
 
-## Quick start
+## Quick start (operator scripts)
+
+The supported entry point is the `scripts/` folder. Each script is
+idempotent, kills leftover ROS first to avoid duplicate RViz, and
+prints what to do next.
 
 ```bash
-ros2 launch ur10e_rg6_moveit_config full_stack.launch.py
-python3 tests/play_pickplace.py
+# Simulation (RViz only — no hardware required)
+bash scripts/launch_sim.sh                       # bring up MoveIt + ros2_control mock
+bash scripts/play_pickplace.sh --max 4           # 2 full pick+place cycles
+bash scripts/kill_ros.sh                         # tear down
+
+# Real hardware (cabinet at 192.168.1.100; see HARDWARE_TEST_HANDOFF.md
+# for pendant prereqs the first time you run on a fresh setup)
+bash scripts/launch_real.sh                      # ping + RTDE probe + launch
+# … load external_control.urp on pendant, press Play, switch to Remote Control …
+bash scripts/play_pickplace.sh --max 4 --real-gripper   # 2 cycles with real RG6
+bash scripts/kill_ros.sh
 ```
 
-See `SESSION_HANDOFF.md` for the full project state, design notes, and
-real-hardware path. See `LAUNCH_RUNBOOK.md` for manual launch / debug steps.
-For WSL2 ↔ UR10e networking (fallback ladder + diagnostic recipes), see
-[`docs/WSL2_UR10e_NETWORKING.md`](docs/WSL2_UR10e_NETWORKING.md).
+See [`scripts/README.md`](scripts/README.md) for the full operator
+reference (flows, gotchas, flag list). For a step-by-step
+hardware-test runbook (with acceptance criteria at each step), see
+[`HARDWARE_TEST_HANDOFF.md`](HARDWARE_TEST_HANDOFF.md).
+
+Background reading:
+- [`SESSION_HANDOFF.md`](SESSION_HANDOFF.md) — full project state, design
+  decisions, calibration values.
+- [`LAUNCH_RUNBOOK.md`](LAUNCH_RUNBOOK.md) — manual launch sequence for when
+  the one-shot scripts misbehave.
+- [`docs/WSL2_UR10e_NETWORKING.md`](docs/WSL2_UR10e_NETWORKING.md) — WSL2 ↔
+  cabinet networking fallback ladder + diagnostics.
+- [`wiki/`](wiki/) — locked decisions, known bugs, mechanism comparisons.
+
+Low-level smoke tests (kept for debug, but `scripts/` is preferred for
+day-to-day use):
 
 ```bash
-# Real-hardware pre-flight (run before `ros2 launch ... use_fake_hardware:=false`)
+# Real-hardware network pre-flight only
 ~/ur_rg6_ws/tests/check_real_hw_network.sh 192.168.1.100
 
-# Minimal smoke test (dry-run first, then --yes to actually move)
+# Single-motion smoke test (dry-run first, then --yes to actually move)
 python3 ~/ur_rg6_ws/tests/real_hw_smoke.py                       # dry-run
 python3 ~/ur_rg6_ws/tests/real_hw_smoke.py --yes                 # sim arm + sim gripper
 python3 ~/ur_rg6_ws/tests/real_hw_smoke.py --yes --real-gripper  # real arm + real gripper
+
+# Gripper alone (binary close/open via UR Tool I/O on pin 16)
+python3 ~/ur_rg6_ws/tests/onrobot_io_grip.py cycle
 ```
 
 ## Docker (no ROS install needed)

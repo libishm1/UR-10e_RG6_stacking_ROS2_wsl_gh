@@ -1,7 +1,46 @@
 # UR10e + RG6 — Session Handoff
 
-Last updated: 2026-05-26 (evening). Read this first; it covers the current state and how
-to pick up where we left off.
+Last updated: 2026-05-27 (late evening — operator scripts + Tool I/O gripper helper landed). Read this first; it covers the current state and how to pick up where we left off.
+
+> **Going to the cell tomorrow?** Use [`HARDWARE_TEST_HANDOFF.md`](HARDWARE_TEST_HANDOFF.md) — it's the step-by-step procedure with acceptance criteria at each step. The checkpoints below are background context.
+
+## CHECKPOINT — 2026-05-27 (late evening — pre-pendant offline work complete, ready for 2026-05-28 hardware test)
+
+Commit `6876cc1` on `main`. With this push, everything that can be done
+without the pendant is done. The next session walks straight into
+[`HARDWARE_TEST_HANDOFF.md`](HARDWARE_TEST_HANDOFF.md) Step 0.
+
+### What landed this checkpoint
+
+- **`scripts/launch_sim.sh`, `launch_real.sh`, `play_pickplace.sh`, `kill_ros.sh`** — durable, in-repo (not `/tmp`) so they survive WSL restarts. Each launcher kills leftovers first → no duplicate RViz. Patterns live INSIDE `kill_ros.sh` so `pkill -f` can't self-match the caller's argv. `launch_real.sh` ping-checks the cabinet and TCP-probes Dashboard + RTDE before launching, fast-failing in <3 s if the network's broken. `play_pickplace.sh` refuses to run if `move_group` isn't alive — it will NOT kill the running stack (by design, so you don't wipe state).
+- **`scripts/README.md`** — operator-facing reference: flows, gotchas, flag list. Written so someone without Claude Code can pick up the stack from scratch.
+- **`tests/onrobot_io_grip.py`** — `OnRobotToolIOGrip` class. Drives the RG6 over UR Tool I/O via `/io_and_status_controller/set_io` (pin 16 HIGH=close, LOW=open). Standalone harness: `python3 tests/onrobot_io_grip.py {close|open|cycle}`. Binary only — width/force args ignored (continuous width needs Compute Box or RS-485 URCap; see `wiki/decisions.md` 2026-05-27 entry).
+- **`tests/play_pickplace.py` `--real-gripper` path rewired.** Was publishing `rg_grip(w,f)` to `/urscript_interface/script_command`, which is unreachable from External Control's URScript socket (PolyScope architectural limit, proven 2026-05-26 via URP rebuild test). Now lazy-connects `OnRobotToolIOGrip` on first call and maps `width<60mm` → CLOSE, else OPEN.
+- **`wiki/decisions.md` 2026-05-27 entry** — refines the 2026-05-26 Tool I/O decision to BINARY only on our e-Series + URCap-on-pendant cell. The upstream `onrobot_gripper.cpp`'s analog-voltage width control assumes a tool flange analog OUT that e-Series controllers don't have.
+- **`HARDWARE_TEST_HANDOFF.md`** (new top-level doc) — step-by-step procedure for the 2026-05-28 hardware run, with acceptance criteria + failure-mode quick lookup at each step.
+- **`README.md`** — now points at `scripts/` as the primary entry point.
+
+### Verified locally before commit
+
+- `bash scripts/launch_sim.sh` → move_group up in 15 s, RViz opens, 3 expected PIDs alive. Clean.
+- `bash scripts/kill_ros.sh` → all PIDs gone, "(end)" printed.
+- `bash scripts/play_pickplace.sh --help` with no stack up → correctly prints `!! move_group is NOT running.` and exits 1 (verified via `bash -x` trace; the wsl.exe bridge eats the exit code in our test harness but the script logic is correct).
+- `python3 -c 'import ast; ast.parse(open("tests/play_pickplace.py").read())'` → clean. Same for `onrobot_io_grip.py`.
+
+### What's NOT verified (needs pendant — tomorrow's job)
+
+- `set_io` to pin 16 actually drives the RG6 (the Tool I/O ownership change at the pendant is required first).
+- Pin numbering for tool DI in `IOStates.digital_in_states` — the third-party analysis mentioned `tool_digital_input_states[0]` but our Humble version's `ur_msgs/msg/IOStates` doesn't have that field. Runtime-verify with `ros2 topic echo /io_and_status_controller/io_states --once`.
+- +45 mm Z calibration at PLACE orientation (different wrist rotation than the PICK orientation where it was tuned).
+- Full real-hw 1-cycle and 20-cycle with `--real-gripper`.
+
+### Where to go next
+
+**At the cell:** [`HARDWARE_TEST_HANDOFF.md`](HARDWARE_TEST_HANDOFF.md) — work top to bottom; each step has its own acceptance criterion.
+
+**Not at the cell:** the remaining offline work is the SRDF `tip_link tool0 → ee_link` switch (would eliminate `WAYPOINT_TOOL_CALIBRATION_M` entirely). Risk: it changes Cartesian-plan endpoints across the whole stack — needs sim verification before real-hw. Defer until after the 2026-05-28 hardware run confirms the current calibration works at PLACE orientation.
+
+---
 
 ## CHECKPOINT — 2026-05-27 (end of overnight session — sim pickplace FULLY LANDED, real-hw motion VERIFIED, gripper engagement only remaining blocker)
 
