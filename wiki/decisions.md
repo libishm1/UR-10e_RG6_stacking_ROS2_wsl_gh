@@ -89,6 +89,63 @@ The proven gripper-via-tool-I/O code path on this exact hardware family.
 
 ---
 
+## 2026-05-27 — Tool I/O on our cell is BINARY only (refines 2026-05-26)
+
+**Decision.** Scope the 2026-05-26 Tool I/O decision: on **this** cell
+(UR10e e-Series + RG6 v1 + OnRobot URCap on pendant, NO Compute Box),
+`set_io` to pin 16 gives **binary close/open only**. There is no
+continuous-width path available via the e-Series tool flange.
+
+**Why the 2026-05-26 entry was over-optimistic.**
+
+The upstream `onrobot_gripper.cpp` references `analog_output_voltage`
+on the tool to set width — but UR **e-Series** controllers have **no
+analog output** to the tool flange (only digital out 0/1 + analog
+**inputs** for sensors). The upstream code was written against either
+CB-series controllers or a setup with an OnRobot Compute Box in front.
+On our cell, `set_io` with `FUN_SET_ANALOG_OUT` to the tool pins is a
+no-op silently — the cabinet has nothing to drive it.
+
+**What this means in practice.**
+
+- For the wood-block stacking demo, **binary is sufficient** — every
+  pick is the same physical block, so a single close-force/close-width
+  is fine. `play_pickplace.py`'s `--real-gripper` path now maps
+  `width_mm < 60` → CLOSE (pin 16 HIGH), else OPEN (pin 16 LOW). The
+  `--force` arg is ignored. See [`tests/onrobot_io_grip.py`](../tests/onrobot_io_grip.py).
+- If a future task **needs** continuous width / variable force, the
+  options are:
+  1. **OnRobot Compute Box** (Modbus TCP) — the OnRobot reference
+     stack expects this; gives mm-level + N-level control without
+     touching the cabinet.
+  2. **OnRobot RS-485 URCap** — talks Modbus over the tool RS-485
+     pins directly from the ROS host. No Compute Box, but needs a
+     URCap reinstall on the pendant.
+  3. **Different gripper** (Robotiq 2F-85 or similar) with a
+     ROS-native driver.
+
+  Out of scope for the current demo; flag if a real task needs it.
+
+- Pin-numbering verification needed at runtime: the third-party
+  pasted analysis said `IOStates.tool_digital_input_states[0]` exists,
+  but `ros2 interface show ur_msgs/msg/IOStates` shows it does NOT in
+  our Humble version. Tool DI for grip-detect may appear in
+  `digital_in_states` at a specific pin number — runtime-verify
+  tomorrow with the driver connected:
+  ```bash
+  ros2 topic echo /io_and_status_controller/io_states --once | head -40
+  ```
+  Until verified, `OnRobotToolIOGrip.close_blocking()` uses a fixed
+  1.5 s settle.
+
+**Pendant prereq this entry locks in.** Installation → General →
+Tool I/O → `Controlled by: User` — required so the OnRobot URCap
+doesn't fight our `set_io` writes. This is a one-time pendant
+config, separate from the URP load + Remote Control mode for
+External Control.
+
+---
+
 ## 2026-05-24 — RG6 real-hardware control: Mechanism C (URScript topic) — SUPERSEDED 2026-05-26
 
 **Decision.** For real-hardware gripper control, use **Mechanism C**:
@@ -150,4 +207,4 @@ for the full A/B/C comparison and the code citations.
 
 ## Last updated
 
-2026-05-26 (very late evening — RG6 decision reversed; Tool I/O is the answer).
+2026-05-27 (Tool I/O scoped to binary-only on our e-Series + URCap-on-pendant cell).

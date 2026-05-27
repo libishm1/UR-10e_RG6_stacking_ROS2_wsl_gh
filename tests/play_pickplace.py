@@ -4,17 +4,23 @@ Two gripper modes:
   --sim          (default) publish JointTrajectory to /rg6_gripper_controller
                  /joint_trajectory — drives the ros2_control mock interface
                  in RViz, using the calibrated width→rad cubic.
-  --real-gripper publish raw URScript `rg_grip(width_mm, force_N)` to
-                 /urscript_interface/script_command — the OnRobot URCap
-                 already installed on the UR pendant executes it directly.
-                 This works WITHOUT an OnRobot Compute Box: the URCap talks
-                 to the gripper over UR tool I/O.
+  --real-gripper drive the OnRobot RG6 over UR Tool I/O via
+                 /io_and_status_controller/set_io. Pin 16 (tool digital
+                 output 0) HIGH = close, LOW = open. BINARY only — width
+                 and force args are ignored (the RG6's onboard MCU picks
+                 the default stroke/force when the line goes HIGH). For
+                 continuous width control you need either an OnRobot
+                 Compute Box (Modbus TCP) or the OnRobot RS-485 URCap.
+                 The OnRobot URCap on the pendant must be set to
+                 Installation → Tool I/O → Controlled by: User so it
+                 doesn't fight these writes.
 
 Maps:
   movel(WP_n)        -> Pilz LIN on ur_manipulator, Cartesian goal (TCP-aware)
   movej(HOME_q)      -> Pilz PTP on ur_manipulator, joint goal
-  rg_grip(width_mm)  -> sim: JointTrajectory using calibrated width→rad
-                        real: URScript `rg_grip(width_mm, force_N)` topic
+  rg_grip(width_mm)  -> sim:  JointTrajectory using calibrated width→rad
+                        real: binary set_io on pin 16 (HIGH=close, LOW=open).
+                              width<60mm → close, else → open.
   rg_payload_set()   -> skipped (no ROS 2 equivalent yet)
   sleep(n)           -> time.sleep(n)
 
@@ -30,10 +36,19 @@ Usage (full stack must be running: ur_control + gripper JTC + move_group):
 """
 import argparse
 import math
+import os
+import sys
 import time
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
+
+# Ensure the helper next to this file is importable when run as
+# `python3 tests/play_pickplace.py` from the workspace root.
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _THIS_DIR not in sys.path:
+    sys.path.insert(0, _THIS_DIR)
+from onrobot_io_grip import OnRobotToolIOGrip
 from moveit_msgs.action import MoveGroup
 from moveit_msgs.msg import (MotionPlanRequest, Constraints, JointConstraint,
                              PositionConstraint, OrientationConstraint,
@@ -384,6 +399,11 @@ class PickPlacePlayer(Node):
         # Always create both — cheap, and means flipping mode at runtime is trivial
         self.grip_pub = self.create_publisher(JointTrajectory, GRIPPER_TOPIC, 10)
         self.urscript_pub = self.create_publisher(String, URSCRIPT_TOPIC, 10)
+        # Real-hardware gripper: binary close/open via UR Tool I/O (set_io).
+        # Lazily connected on first grip() call so the node still constructs
+        # cleanly when the driver isn't up (sim mode, dry tests, etc.).
+        self._io_grip = OnRobotToolIOGrip(self) if real_gripper else None
+        self._io_grip_connected = False
         # Box visualisation via planning-scene diffs (LATCHED so move_group picks them up)
         from rclpy.qos import QoSProfile, DurabilityPolicy
         scene_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
@@ -473,19 +493,43 @@ class PickPlacePlayer(Node):
         return self._send(g, f"movel({planner}) TCP=({x_tcp:.3f},{y_tcp:.3f},{z_tcp:.3f})")
 
     # ---------- gripper ----------
+    # Width threshold below which a --real-gripper grip() means CLOSE. The
+    # URScript program uses ~25 mm for grip-on-block and ~80 mm for open;
+    # 60 mm is a safe midpoint that maps either intent to the right line state.
+    REAL_GRIP_CLOSE_THRESHOLD_MM = 60.0
+
     def grip(self, width_mm):
         if self.real_gripper:
-            # Path 1: send URScript directly. The OnRobot URCap on the UR
-            # pendant executes rg_grip() via tool I/O — no Compute Box needed.
-            cmd = (f"rg_grip({float(width_mm):.1f}, "
-                   f"{float(self.grip_force_n):.1f}, "
-                   f"tool_index=0, blocking=True, depth_comp=False, popupmsg=False)\n")
-            self.get_logger().info(
-                f"  grip {width_mm:.0f} mm @ {self.grip_force_n:.0f} N (URScript)")
-            self.urscript_pub.publish(String(data=cmd))
-            # rg_grip is `blocking=True` so the UR controller waits; give it
-            # plenty of headroom before the next motion command
-            time.sleep(GRIP_TIME + 0.5)
+            # Binary close/open via UR Tool I/O. The URScript-topic path
+            # (rg_grip) is unreachable from /urscript_interface/script_command —
+            # the OnRobot URCap registers its functions in a Java-backed
+            # PolyScope namespace, not the URScript runtime that External
+            # Control evaluates. Verified empirically 2026-05-26 via a URP
+            # rebuild test (see SESSION_HANDOFF.md). Tool I/O bypasses the
+            # URCap entirely: pin 16 HIGH = close, LOW = open.
+            if not self._io_grip_connected:
+                if not self._io_grip.connect():
+                    self.get_logger().error(
+                        "  grip: SetIO service unreachable — is the real-hw "
+                        "driver up? Falling back to no-op for this call.")
+                    return
+                self._io_grip_connected = True
+
+            close = float(width_mm) < self.REAL_GRIP_CLOSE_THRESHOLD_MM
+            if close:
+                ok, msg = self._io_grip.close_blocking()
+                self.get_logger().info(
+                    f"  grip {width_mm:.0f} mm → CLOSE (tool DO0 HIGH) — {msg}")
+            else:
+                ok, msg = self._io_grip.open()
+                # close_blocking() already settles; open() is non-blocking,
+                # so add a small settle window here for symmetry with the
+                # rest of the program.
+                time.sleep(GRIP_TIME)
+                self.get_logger().info(
+                    f"  grip {width_mm:.0f} mm → OPEN  (tool DO0 LOW)  — {msg}")
+            if not ok:
+                self.get_logger().warn("  grip: set_io returned success=False")
             return
 
         # Path 2: simulation — publish a joint trajectory using the calibrated
@@ -675,17 +719,22 @@ def main():
     ap.add_argument("--max", type=int, default=None,
                     help="Stop after N pick-place cycles (default: run all 20)")
     ap.add_argument("--real-gripper", action="store_true",
-                    help="Drive gripper via URScript topic (uses the OnRobot URCap"
-                         " on the UR pendant — no Compute Box needed). Default is"
-                         " sim: publishes JointTrajectory.")
+                    help="Drive the real RG6 over UR Tool I/O via set_io on "
+                         "pin 16 (BINARY close/open only — width is ignored). "
+                         "Requires pendant Installation → Tool I/O → "
+                         "Controlled by: User. Default is sim mode "
+                         "(publishes JointTrajectory to the RViz mock).")
     ap.add_argument("--force", type=float, default=RG6_DEFAULT_FORCE_N,
-                    help=f"Grip force in N for --real-gripper mode (default {RG6_DEFAULT_FORCE_N:.0f})")
+                    help="IGNORED in --real-gripper mode (binary Tool I/O "
+                         "can't set force). Kept for arg-parity with the "
+                         "old URScript path.")
     args = ap.parse_args()
 
     rclpy.init()
     n = PickPlacePlayer(real_gripper=args.real_gripper, grip_force_n=args.force)
     if args.real_gripper:
-        print("[gripper] REAL mode — publishing URScript rg_grip(w, f) commands")
+        print("[gripper] REAL mode — binary close/open via UR Tool I/O "
+              "(set_io pin 16). Width/force args ignored.")
     else:
         print("[gripper] SIM mode — publishing JointTrajectory to controller")
     if not n.wait_ready():
