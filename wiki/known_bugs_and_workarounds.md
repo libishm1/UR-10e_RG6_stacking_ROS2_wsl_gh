@@ -69,19 +69,18 @@ launches separate from dashboard commands.
 fully closed; `open()`=160 / `close_blocking()`=0 are the demo values. reg 267
 (@258 off 9) is width but NON-LINEAR vs fingertip gap — not exact mm.
 
-**grip-detect — NOT reliably verified (EXPERIMENTAL).** An initial run looked
-clean (close-on-block → status word @258 off10 = 1; close-on-empty → off10 = 2)
-but a later **full** empty close also read **off10 = 1** — the same bit as a
-real grip. So **off10 bit0 is NOT a clean grip flag** (it's set for a full
-empty close too), and bit1 seems tied to *where* the jaws stopped, not to
-holding an object. The earlier "clean" comparison had both closes stopping at
-~60 mm (likely the block present in both), which is why it looked decisive.
-**Until re-tested with a fixture holding a known-width object** (compare the
-full 18-word status block at the SAME commanded+actual width), judge a grip
-from the **WIDTH** (off9 stopping short of full close), not from
-`grip_detected()` — which is left in `onrobot_modbus_grip.py` as an EXPERIMENTAL
-heuristic. (A duplicate `BIT_GRIP_DETECT` line had also silently forced it to
-bit1; fixed.)
+**grip-detect — use the WIDTH, not the status word (VERIFIED 2026-05-28).**
+Controlled test with the block actually REMOVED for the empty close (not just
+slid aside): close-on-block → jaws stop at the object, width **~59.9 mm**;
+close-on-empty → jaws fully close, **~10.3 mm**. The status word @258 off10 was
+the **same (=2) in BOTH** (and read 1 in other runs) → it is NOT a grip flag.
+An earlier "off10 bit0 = grip" claim was an artifact of the block being present
+in BOTH closes. So **grip-detect = jaws stopped SHORT of the commanded width by
+more than ~15 mm** (`GRIP_STOP_MARGIN_MM`): after `close_blocking()` (cmd 0) a
+final width >~25 mm means an object is held; ~10 mm means empty.
+`onrobot_modbus_grip.py` `grip_detected()`/`grip_to()` now use this width
+method. (A duplicate `BIT_GRIP_DETECT` line that silently forced the old bit
+check to bit1 was also removed.)
 
 ---
 

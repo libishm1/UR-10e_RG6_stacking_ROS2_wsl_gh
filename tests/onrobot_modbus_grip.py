@@ -83,24 +83,22 @@ FN_WRITE_MULTIPLE = 0x10
 #     only. Also: before the FIRST grip command of a power cycle it reads
 #     garbage (~64404 -> "6440 mm"); valid only after a grip.
 #   - offset 5 is NOT width (ruled out earlier).
-# GRIP-DETECT (status word @258 offset 10): NOT RELIABLY VERIFIED — EXPERIMENTAL.
-#   Observed, but INCONSISTENT across runs:
-#     close on BLOCK (~60 mm)       -> off10 = 1 (bit0)
-#     close on NOTHING (~60 mm stop) -> off10 = 2 (bit1)   [looked like grip vs not]
-#     close on NOTHING (full ~10 mm) -> off10 = 1 (bit0)   [contradicts the above]
-#   So bit0 is set for BOTH a real grip AND a full empty close → it is NOT a
-#   clean grip-detect flag, and bit1 seems tied to *where* the jaws stopped, not
-#   to holding an object. grip_detected() below is a best-effort heuristic only.
-#   TODO: re-test with a FIXTURE holding a known-width object and compare the
-#   full 18-word status block at the SAME commanded+actual width. Until then,
-#   trust the WIDTH (off9) + your eyes, not grip_detected(). See known_bugs.
+# GRIP-DETECT — use the WIDTH, not the status word. VERIFIED 2026-05-28 with a
+# controlled close-on-block (block removed for the empty close, not just slid):
+#     close on BLOCK   -> jaws stop at the object: width ~59.9 mm
+#     close on NOTHING -> jaws fully close:        width ~10.3 mm
+# The status word @258 off10 was the SAME (=2) in both, and read 1 in other
+# runs — it is NOT a reliable grip flag (an earlier "clean" result was an
+# artifact of the block being present in BOTH closes). So:
+#   grip_detected = jaws stopped SHORT of the commanded width by > GRIP_STOP_
+#   MARGIN_MM (an object blocked them). For close_blocking() (cmd 0): a final
+#   width above ~the empty-close floor (~10 mm) means an object is held.
 CMD_ADDR = 0                 # write [force, width, control]
 STATUS_ADDR = 258            # read 18 words
 STATUS_COUNT = 18
 ST_WIDTH = 9                 # reg 267 = actual width (0.1 mm) — VERIFIED (non-linear)
-ST_STATUS = 10               # status bitfield — semantics NOT pinned (see above)
-BIT_GRIP_DETECT = 1 << 0     # bit0 (EXPERIMENTAL — also set on a full empty close)
-BIT_POSITION_REACHED = 1 << 1  # bit1 (seen on a partial-stop close)
+ST_STATUS = 10               # status word — kept for raw reporting; NOT grip-detect
+                             # (reads the same value gripped vs empty; see above)
 
 CTRL_GRIP = 1
 CTRL_STOP = 8
@@ -112,6 +110,10 @@ RG6_MIN_WIDTH_MM = 0.0
 # Safe/slow default: lower force = slower close (RG6 speed proportional to
 # force). Honours the project safe-default rule; bump only on explicit ask.
 DEFAULT_FORCE_N = 40.0
+# Grip-detect (WIDTH-based, verified 2026-05-28): an object is held if the jaws
+# stopped more than this far SHORT of the commanded width. Empty close floors at
+# ~10 mm; a 50 mm block holds at ~60 mm, so 15 mm cleanly separates them.
+GRIP_STOP_MARGIN_MM = 15.0
 
 
 def _crc16(data: bytes) -> int:
@@ -148,6 +150,7 @@ class OnRobotModbusGrip:
         self._robot_ip = robot_ip
         self._tool_comm_port = tool_comm_port
         self._ser = None
+        self._last_cmd_width_mm = None   # for WIDTH-based grip_detected()
 
     def _log(self, msg: str, level: str = "info"):
         if self._node is not None:
@@ -313,32 +316,34 @@ class OnRobotModbusGrip:
         return None if regs is None else regs[ST_STATUS]
 
     def grip_detected(self) -> bool:
-        """EXPERIMENTAL — do NOT trust yet. The status-word semantics aren't
-        pinned (bit0 is also set on a full empty close), so this can false-
-        positive. Prefer judging a grip from the WIDTH (read_width_mm stopping
-        short of full close on an object). See the register-map note above /
-        known_bugs. Kept so the value is exposed once the semantics are nailed."""
-        regs = self._read_status()
-        if regs is None:
+        """WIDTH-based (verified 2026-05-28): an object is held if the jaws
+        stopped more than GRIP_STOP_MARGIN_MM SHORT of the last commanded width.
+        Only meaningful after a grip_to()/close_blocking() (uses the last
+        command as the reference). Returns False if nothing's been commanded."""
+        if self._last_cmd_width_mm is None:
             return False
-        st = regs[ST_STATUS]
-        return bool((st & BIT_GRIP_DETECT) and not (st & BIT_POSITION_REACHED))
+        w = self.read_width_mm()
+        if w is None:
+            return False
+        return (w - self._last_cmd_width_mm) > GRIP_STOP_MARGIN_MM
 
     # ---------- motion API ----------
     def grip_to(self, width_mm: float, force_n: Optional[float] = None) -> Tuple[bool, str]:
-        """Move to target width applying up to target force, then block until
-        the gripper reports not-busy (or timeout). Returns (ok, reason)."""
+        """Move to target width applying up to target force, then settle.
+        Reports grip via WIDTH: an object is held if the jaws stopped short of
+        the commanded width by > GRIP_STOP_MARGIN_MM. Returns (ok, reason)."""
         f = self._default_force_n if force_n is None else force_n
+        cmd_w = max(RG6_MIN_WIDTH_MM, min(RG6_MAX_WIDTH_MM, width_mm))
+        self._last_cmd_width_mm = cmd_w
         if not self._write_grip(width_mm, f):
             return False, "modbus write failed"
         regs = self._wait_done()
         if regs is None:
-            return True, f"commanded width={width_mm:.0f}mm (no status readback)"
+            return True, f"commanded width={cmd_w:.0f}mm (no status readback)"
         w = regs[ST_WIDTH] / 10.0
-        st = regs[ST_STATUS]
-        det = bool((st & BIT_GRIP_DETECT) and not (st & BIT_POSITION_REACHED))
-        return True, (f"width={w:.1f}mm status={st} (grip_detected={det}, "
-                      f"EXPERIMENTAL) force={f:.0f}N")
+        det = (w - cmd_w) > GRIP_STOP_MARGIN_MM
+        return True, (f"width={w:.1f}mm grip_detected={det} "
+                      f"(stopped {w - cmd_w:+.1f}mm vs cmd {cmd_w:.0f}) force={f:.0f}N")
 
     # ---------- drop-in compatibility with OnRobotToolIOGrip ----------
     def close_blocking(self, width_mm: float = 0.0,
