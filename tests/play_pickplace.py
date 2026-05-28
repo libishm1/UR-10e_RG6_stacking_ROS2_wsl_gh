@@ -521,6 +521,12 @@ class PickPlacePlayer(Node):
             # rebuild test (see SESSION_HANDOFF.md). Tool I/O bypasses the
             # URCap entirely: pin 16 HIGH = close, LOW = open.
             if not self._io_grip_connected:
+                # ONE-TIME (not per grip): swap in a fresh socat before the
+                # first connect, so a stale/locked socat left by a prior
+                # scripts/grip.sh run doesn't fail us. After this single connect
+                # the handle is held open for the whole run — no further resets.
+                if self.gripper_backend == "modbus":
+                    self._io_grip.reset_socat()
                 if not self._io_grip.connect():
                     self.get_logger().error(
                         "  grip: gripper backend unreachable — is the real-hw "
