@@ -21,13 +21,24 @@
 #   * Tool I/O → Communication Interface (RS485), 1M / Even / One / 1.5 / 3.5
 #   * Tool Output Voltage: 24 V
 #   * OnRobot Setup → Device: No connection (so the URCap releases RS485)
-#   * NOTE (verify): on e-Series the controller's Tool Communication Interface
-#     may be enough; if /tmp/ttyUR never appears, the `rs485` daemon URCap may
-#     need installing (free UR software). See wiki/rg6_rs485_modbus.md.
+#   * rs485 daemon URCap installed (CONFIRMED REQUIRED, coexists with OnRobot
+#     URCap): /root/.urcaps/rs485-1.0.jar — it opens 54321 / bridges the tool.
+#   * Cabinet firewall: inbound port 54321 ALLOWED (Settings → Security →
+#     General). Without it the host can't reach the daemon.
+#   * external_control.urp must be PLAYING — the rs485 bridge runs inside the
+#     control program; the GRIPPER is NOT reachable until the URP plays.
 #
-# After this returns, the arm still won't move until external_control.urp is
-# Playing + Remote Control. The GRIPPER, however, is reachable immediately
-# over Modbus — test it with:
+# OPERATIONAL TRAPS (see wiki/known_bugs_and_workarounds.md "RG6 over RS485"):
+#   * Gripper Modbus needs the URP PLAYING (not just the stack up).
+#   * If Modbus reads return None but 54321 is open: the cabinet rs485 daemon
+#     is stuck on a stale connection (common after `wsl --shutdown` or
+#     admin-mode WSL). Replaying External Control does NOT fix it — RESTART
+#     POLYSCOPE. And use a NORMAL (non-admin) WSL terminal.
+#   * socat locks the pty after one open/close — open once & hold, or reset
+#     socat between standalone test runs.
+#
+# After this returns, the arm won't move until external_control.urp is Playing
+# + Remote Control. Then test the gripper (URP must be playing) with:
 #   python3 tests/onrobot_modbus_grip.py status
 #   python3 tests/onrobot_modbus_grip.py cycle
 #

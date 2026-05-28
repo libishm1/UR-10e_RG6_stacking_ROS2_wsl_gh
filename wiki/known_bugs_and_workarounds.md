@@ -20,6 +20,59 @@ sessions: search this first before re-discovering anything.
 - [OnRobot URCap cold-boot quirk](#onrobot-urcap-cold-boot-quirk)
 - [pickplace LIN→PTP retry CONTROL_FAILED noise](#pickplace-linptp-retry-control_failed-noise)
 - [Calibration extraction doesn't fix the 1m+ TCP-Z mismatch](#calibration-extraction-doesnt-fix-the-1m-tcp-z-mismatch)
+- [RG6 over RS485/Modbus — operational gotchas](#rg6-over-rs485modbus--operational-gotchas-tool-comm-bridge)
+
+---
+
+## RG6 over RS485/Modbus — operational gotchas (tool-comm bridge)
+
+**2026-05-28.** Driving the RG6 Modbus over the tool flange works, but several
+operational traps bite. Full setup + register map: [rg6_rs485_modbus.md](rg6_rs485_modbus.md).
+
+**Prereqs for ANY gripper comms (all must hold):**
+- `ros` installation: Tool I/O Controlled by **User** + **Communication Interface**
+  (1M/Even/One) + Tool Output Voltage **24** + OnRobot Setup device = **None**.
+- rs485 daemon URCap installed on the cabinet (`/root/.urcaps/rs485-1.0.jar`).
+- Cabinet firewall: inbound port **54321** allowed (Settings → Security → General).
+- `socat` installed on the host (`sudo apt install socat`).
+- `external_control.urp` **PLAYING** — the rs485 bridge runs inside the control
+  program; without it, 54321 listens but no tool data flows.
+
+**Trap 1 — socat pty locks after ONE open.** The driver's socat uses
+`waitslave`; once a client opens `/tmp/ttyUR` and closes it, socat locks the
+pty (to the cabinet's 1M baud) and the NEXT open fails `(22) Invalid argument`.
+Open ONCE and hold the handle for the whole session (`OnRobotModbusGrip.connect()`
+does). For repeated standalone tests, reset socat between runs (Trap 3) or relaunch.
+
+**Trap 2 — rs485 daemon STUCK on a stale TCP connection.** After `wsl --shutdown`,
+an **admin-mode WSL** session, or any abrupt host kill, an old socat connection
+to 54321 is left half-open (`FIN-WAIT-2`); the cabinet's rs485 daemon keeps
+bridging the dead socket and the gripper never replies (Modbus reads → None)
+EVEN THOUGH 54321 is open and a new socat is ESTABLISHED. **Replaying External
+Control does NOT reset the daemon** (separate URCap service). **Fix: restart
+PolyScope (or power-cycle the cabinet).** And **avoid admin-mode WSL** — it
+caused the connection churn.
+
+**Trap 3 — fast socat reset (skip a 40 s full relaunch).** Kill the driver's
+socat by PID (scan `/proc` for a cmdline that *starts with* `socat` and
+contains `ttyUR` — NOT `pkill -f`, which self-matches), then restart it:
+`socat pty,link=/tmp/ttyUR,raw,ignoreeof,waitslave tcp:192.168.1.100:54321 &`.
+~5 s vs ~40 s.
+
+**Trap 4 — kill_ros.sh self-kill via "dashboard_client".** Don't run a launch
+script (it calls `kill_ros.sh`) in the same shell as a command containing a
+kill_ros pattern (e.g. `ros2 service call /dashboard_client/...`). kill_ros's
+`pkill -f dashboard_client` matches your shell's argv → SIGKILL (exit 9). Keep
+launches separate from dashboard commands.
+
+**Calibration / status (2026-05-28):** cmd 160 → ~150 mm (mech max); cmd 0 →
+fully closed; `open()`=160 / `close_blocking()`=0 are the demo values. reg 267
+(@258 off 9) is width but NON-LINEAR vs fingertip gap — not exact mm. Status
+word @258 off 10: bit0 = BUSY (set during motion). **grip-detect bit NOT yet
+identified** — open→gripped register diffs are dominated by the position
+change, and the block falls out when the gripper opens, so a clean block-in vs
+block-out comparison at the same close width needs a FIXTURE to hold the block.
+TODO next session.
 
 ---
 
