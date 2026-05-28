@@ -44,6 +44,14 @@ fi
 #   ros2 run tf2_ros static_transform_publisher --frame-id world --child-frame-id base_link
 # or set RViz → Global Options → Fixed Frame → base_link.
 
+# --- kill any existing RViz so we never end up with TWO windows ---
+# full_stack.launch.py bundles its OWN (detached) RViz; this script then runs
+# a foreground one that actually surfaces under WSLg. Kill the bundled one
+# first so there's exactly ONE window. (Safe: this script's own cmdline is
+# "bash .../view_rviz.sh" — it contains "view_rviz", not "rviz2".)
+pkill -9 -f "rviz2 -d" >/dev/null 2>&1 || true
+sleep 1
+
 # --- RViz config path (install overlay, fall back to src) ---
 RVIZ_CFG="$WS_ROOT/install/ur10e_rg6_moveit_config/share/ur10e_rg6_moveit_config/config/moveit.rviz"
 if [ ! -f "$RVIZ_CFG" ]; then
