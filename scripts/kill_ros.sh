@@ -25,6 +25,8 @@ PATTERNS=(
   "robot_state_helper"
   "dashboard_client"
   "urscript_interface"
+  "tool_communication"
+  "/tmp/ttyUR"
 )
 for pat in "${PATTERNS[@]}"; do
   pkill -9 -f "$pat" >/dev/null 2>&1 || true

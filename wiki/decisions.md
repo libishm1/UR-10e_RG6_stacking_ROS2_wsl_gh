@@ -10,6 +10,55 @@ Pattern borrowed from `D:\robot_ws\robots\wiki\project_management\decisions.md`.
 
 ---
 
+## 2026-05-28 — RG6 control: digital tool-I/O PARKED, **RS485/Modbus chosen** (supersedes the 2026-05-27 binary-Tool-I/O plan)
+
+**Decision.** Drive the real RG6 over the **UR tool-flange RS485 (Modbus
+RTU)**, bridged to the host by `ur_robot_driver`'s `use_tool_communication`.
+The digital tool-I/O path (`set_io` pins 16/17) is **abandoned**.
+
+**Why — tested on hardware at the cell (2026-05-28).** Driving the tool
+digital outputs tripped the cabinet's **tool-connector overcurrent
+protection, twice**, and the gripper never moved:
+- Sinking (NPN) → "too high **sink** current on Digital Output 0, low side"
+- Sourcing (PNP) → "too high **source** current on Digital Output 1, high side"
+
+Both polarities fault ⇒ the RG6's digital lines present a low-impedance load
+because the gripper is in **RS485/URCap mode, not Teach mode** — its MCU
+holds the I/O lines. The reference drivers assume a gripper *already in Teach
+mode (URCap uninstalled)*, which we could not achieve from software. Full
+post-mortem + the digital retry handoff:
+[rg6_urcap_hardware_pitfalls.md](rg6_urcap_hardware_pitfalls.md).
+
+RS485 is the gripper's **native** channel (the same one the URCap uses), so
+it carries **no overcurrent risk** (comm bus, not a driven power line), gives
+**continuous width + force + grip-detect**, and **coexists with External
+Control** for arm motion. The tool-comm params match this cell's pendant
+exactly (1M / Even / One / 24 V).
+
+**Implications / what changed in code.**
+- New [tests/onrobot_modbus_grip.py](../tests/onrobot_modbus_grip.py) —
+  pymodbus RTU client, device_id 65, write regs 0–2 `[force×10, width×10, 1]`,
+  read regs 258+ (width @9, status @10). Register map + setup:
+  [rg6_rs485_modbus.md](rg6_rs485_modbus.md).
+- New [scripts/launch_real_rs485.sh](../scripts/launch_real_rs485.sh) —
+  full stack with `use_tool_communication:=true tool_voltage:=24` etc.;
+  `full_stack.launch.py` + `ur10e_rg6_control.launch.py` thread the tool args
+  through (defaults OFF, so sim/digital launches are unchanged).
+- `play_pickplace.py --real-gripper` now defaults to `--gripper modbus`
+  (continuous); `--gripper io` keeps the parked digital path for reference.
+- [tests/onrobot_io_grip.py](../tests/onrobot_io_grip.py) kept but PARKED.
+
+**To verify at the cell (not yet hardware-tested).** (1) the register map
+holds over RTU (read actual width, confirm it tracks the fingers); (2) whether
+e-Series needs the `rs485` daemon URCap or `use_tool_communication` suffices;
+(3) URCap coexistence (rs485 vs OnRobot URCap) — likely the two-installation
+pattern. See [rg6_rs485_modbus.md](rg6_rs485_modbus.md) "Working assumptions".
+
+**Reference.** [tonydle/ur_onrobot](https://github.com/tonydle/ur_onrobot),
+[Osaka-University-Harada-Laboratory/onrobot](https://github.com/Osaka-University-Harada-Laboratory/onrobot).
+
+---
+
 ## 2026-05-26 (very late evening) — RG6 real-hardware control: REVERSED to Mechanism A/B (Tool I/O), NOT Mechanism C
 
 **Decision.** Use **Tool digital I/O** for real-hardware gripper control —
@@ -207,4 +256,4 @@ for the full A/B/C comparison and the code citations.
 
 ## Last updated
 
-2026-05-27 (Tool I/O scoped to binary-only on our e-Series + URCap-on-pendant cell).
+2026-05-28 (digital tool-I/O PARKED after hardware overcurrent faults; RS485/Modbus chosen).

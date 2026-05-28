@@ -48,7 +48,8 @@ from rclpy.action import ActionClient
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 if _THIS_DIR not in sys.path:
     sys.path.insert(0, _THIS_DIR)
-from onrobot_io_grip import OnRobotToolIOGrip
+from onrobot_io_grip import OnRobotToolIOGrip       # PARKED digital path
+from onrobot_modbus_grip import OnRobotModbusGrip    # chosen RS485/Modbus path
 from moveit_msgs.action import MoveGroup
 from moveit_msgs.msg import (MotionPlanRequest, Constraints, JointConstraint,
                              PositionConstraint, OrientationConstraint,
@@ -391,18 +392,30 @@ def err_name(code):
 
 
 class PickPlacePlayer(Node):
-    def __init__(self, real_gripper: bool = False, grip_force_n: float = RG6_DEFAULT_FORCE_N):
+    def __init__(self, real_gripper: bool = False, grip_force_n: float = RG6_DEFAULT_FORCE_N,
+                 gripper_backend: str = "modbus"):
         super().__init__("pickplace_player")
         self.mg = ActionClient(self, MoveGroup, "/move_action")
         self.real_gripper = real_gripper
         self.grip_force_n = grip_force_n
+        self.gripper_backend = gripper_backend
         # Always create both — cheap, and means flipping mode at runtime is trivial
         self.grip_pub = self.create_publisher(JointTrajectory, GRIPPER_TOPIC, 10)
         self.urscript_pub = self.create_publisher(String, URSCRIPT_TOPIC, 10)
-        # Real-hardware gripper: binary close/open via UR Tool I/O (set_io).
-        # Lazily connected on first grip() call so the node still constructs
-        # cleanly when the driver isn't up (sim mode, dry tests, etc.).
-        self._io_grip = OnRobotToolIOGrip(self) if real_gripper else None
+        # Real-hardware gripper. Two backends:
+        #   "modbus" (default, CHOSEN): RS485/Modbus over the tool flange —
+        #     continuous width+force, native channel, no overcurrent risk.
+        #   "io" (PARKED): binary digital tool I/O via set_io — tripped tool
+        #     overcurrent on this cell (gripper not in Teach mode). See
+        #     wiki/rg6_urcap_hardware_pitfalls.md.
+        # Lazily connected on first grip() call so the node constructs cleanly
+        # when the driver isn't up (sim, dry tests).
+        if not real_gripper:
+            self._io_grip = None
+        elif gripper_backend == "io":
+            self._io_grip = OnRobotToolIOGrip(self)
+        else:
+            self._io_grip = OnRobotModbusGrip(self, default_force_n=grip_force_n)
         self._io_grip_connected = False
         # Box visualisation via planning-scene diffs (LATCHED so move_group picks them up)
         from rclpy.qos import QoSProfile, DurabilityPolicy
@@ -510,26 +523,27 @@ class PickPlacePlayer(Node):
             if not self._io_grip_connected:
                 if not self._io_grip.connect():
                     self.get_logger().error(
-                        "  grip: SetIO service unreachable — is the real-hw "
-                        "driver up? Falling back to no-op for this call.")
+                        "  grip: gripper backend unreachable — is the real-hw "
+                        "driver up (RS485: launch_real_rs485.sh)? Skipping grip.")
                     return
                 self._io_grip_connected = True
 
-            close = float(width_mm) < self.REAL_GRIP_CLOSE_THRESHOLD_MM
-            if close:
-                ok, msg = self._io_grip.close_blocking()
-                self.get_logger().info(
-                    f"  grip {width_mm:.0f} mm → CLOSE (tool DO0 HIGH) — {msg}")
+            if self.gripper_backend == "io":
+                # PARKED binary path: width<threshold → close, else open.
+                close = float(width_mm) < self.REAL_GRIP_CLOSE_THRESHOLD_MM
+                if close:
+                    ok, msg = self._io_grip.close_blocking()
+                    self.get_logger().info(f"  grip {width_mm:.0f} mm → CLOSE (io) — {msg}")
+                else:
+                    ok, msg = self._io_grip.open()
+                    time.sleep(GRIP_TIME)
+                    self.get_logger().info(f"  grip {width_mm:.0f} mm → OPEN (io) — {msg}")
             else:
-                ok, msg = self._io_grip.open()
-                # close_blocking() already settles; open() is non-blocking,
-                # so add a small settle window here for symmetry with the
-                # rest of the program.
-                time.sleep(GRIP_TIME)
-                self.get_logger().info(
-                    f"  grip {width_mm:.0f} mm → OPEN  (tool DO0 LOW)  — {msg}")
+                # Modbus path: command the actual target width at force.
+                ok, msg = self._io_grip.grip_to(width_mm, self.grip_force_n)
+                self.get_logger().info(f"  grip {width_mm:.0f} mm (modbus) — {msg}")
             if not ok:
-                self.get_logger().warn("  grip: set_io returned success=False")
+                self.get_logger().warn("  grip: gripper command reported failure")
             return
 
         # Path 2: simulation — publish a joint trajectory using the calibrated
@@ -719,22 +733,29 @@ def main():
     ap.add_argument("--max", type=int, default=None,
                     help="Stop after N pick-place cycles (default: run all 20)")
     ap.add_argument("--real-gripper", action="store_true",
-                    help="Drive the real RG6 over UR Tool I/O via set_io on "
-                         "pin 16 (BINARY close/open only — width is ignored). "
-                         "Requires pendant Installation → Tool I/O → "
-                         "Controlled by: User. Default is sim mode "
+                    help="Drive the real RG6 (default backend: RS485/Modbus over "
+                         "the tool flange — continuous width+force). Requires the "
+                         "stack launched with use_tool_communication "
+                         "(scripts/launch_real_rs485.sh). Default is sim mode "
                          "(publishes JointTrajectory to the RViz mock).")
+    ap.add_argument("--gripper", choices=["modbus", "io"], default="modbus",
+                    help="real-gripper backend: 'modbus'=RS485/Modbus (continuous, "
+                         "CHOSEN path); 'io'=digital tool I/O via set_io (PARKED — "
+                         "trips tool overcurrent on this cell, see wiki).")
     ap.add_argument("--force", type=float, default=RG6_DEFAULT_FORCE_N,
-                    help="IGNORED in --real-gripper mode (binary Tool I/O "
-                         "can't set force). Kept for arg-parity with the "
-                         "old URScript path.")
+                    help=f"Grip force in N for the modbus backend (default "
+                         f"{RG6_DEFAULT_FORCE_N:.0f}; RG6 range 25-120 N). "
+                         "Ignored by the 'io' backend.")
     args = ap.parse_args()
 
     rclpy.init()
-    n = PickPlacePlayer(real_gripper=args.real_gripper, grip_force_n=args.force)
-    if args.real_gripper:
-        print("[gripper] REAL mode — binary close/open via UR Tool I/O "
-              "(set_io pin 16). Width/force args ignored.")
+    n = PickPlacePlayer(real_gripper=args.real_gripper, grip_force_n=args.force,
+                        gripper_backend=args.gripper)
+    if args.real_gripper and args.gripper == "modbus":
+        print(f"[gripper] REAL mode — RS485/Modbus over tool flange "
+              f"(continuous width, {args.force:.0f} N).")
+    elif args.real_gripper:
+        print("[gripper] REAL mode — digital tool I/O (PARKED backend; may fault).")
     else:
         print("[gripper] SIM mode — publishing JointTrajectory to controller")
     if not n.wait_ready():

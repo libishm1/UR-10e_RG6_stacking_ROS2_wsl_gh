@@ -1,8 +1,70 @@
 # UR10e + RG6 — Session Handoff
 
-Last updated: 2026-05-27 (late evening — operator scripts + Tool I/O gripper helper landed). Read this first; it covers the current state and how to pick up where we left off.
+Last updated: 2026-05-28 (cell session — RS485/Modbus gripper path: live comms achieved). Read this first; it covers the current state and how to pick up where we left off.
 
 > **Going to the cell tomorrow?** Use [`HARDWARE_TEST_HANDOFF.md`](HARDWARE_TEST_HANDOFF.md) — it's the step-by-step procedure with acceptance criteria at each step. The checkpoints below are background context.
+
+## CHECKPOINT — 2026-05-28 (cell session — RG6 over RS485/Modbus: LIVE COMMS, register-map confirm pending)
+
+The full story + reasoning is in [`wiki/rg6_rs485_modbus.md`](wiki/rg6_rs485_modbus.md)
+and [`wiki/rg6_urcap_hardware_pitfalls.md`](wiki/rg6_urcap_hardware_pitfalls.md).
+Summary of today:
+
+**Digital tool-I/O gripper path → ABANDONED.** Driving `set_io` pins 16/17
+tripped the cabinet's tool-connector **overcurrent** protection twice (sink
+on DO0, source on DO1); the gripper never moved. Root cause: the RG6 isn't
+in Teach mode (its MCU holds the digital lines). Parked. See decisions.md.
+
+**RS485/Modbus path → CHOSEN and now talking to the gripper.** The chain that
+works, in order (every step was a real blocker we cleared):
+1. `tests/onrobot_modbus_grip.py` — **plain pyserial + hand-rolled Modbus RTU**
+   (NOT pymodbus: pymodbus opens the socat pty with `exclusive=True` +
+   modem-control → EINVAL; plain pyserial `rtscts=False,dsrdtr=False,
+   exclusive=False` opens cleanly). No pymodbus dependency.
+2. `scripts/launch_real_rs485.sh` — full stack with `use_tool_communication:=true`
+   (args threaded through `full_stack.launch.py` + `ur10e_rg6_control.launch.py`).
+   ⚠️ **VENDORED EDIT NOT IN GIT:** `ur10e_rg6_control.launch.py` lives in
+   `src/onrobot1_ros/`, a NESTED git repo (from `vcs import`), so it can't be
+   committed to this repo. The edit adds 8 `tool_*` LaunchConfigurations +
+   DeclareLaunchArguments (defaults OFF) and forwards them to
+   `ur_control.launch.py`. **Re-apply after any `vcs import src < ros2.repos`**
+   or the RS485 tool-comm threading breaks. (full_stack.launch.py IS committed
+   and has the matching args.)
+3. **Host needs `socat`** (`sudo apt install socat`) — the driver bridges tool
+   RS485 → `/tmp/ttyUR` via socat. `kill_ros.sh` now also kills stray socat.
+4. **rs485 daemon URCap installed on the cabinet** at
+   `/root/.urcaps/rs485-1.0.jar` (SCP'd from `ur_robot_driver/resources/`).
+   It **coexists with the OnRobot URCap** (both load; socat listens on 54321).
+5. **Cabinet firewall: opened port 54321.** Pendant → Settings → Security →
+   General → inbound-port-disable changed to allow 54321
+   (`1-21,23-54320,54322-65535`). Without this, 54321 was DROPped.
+6. **`external_control.urp` must be PLAYING** (start via dashboard:
+   `ros2 service call /dashboard_client/play std_srvs/srv/Trigger`) — the
+   rs485 daemon that opens 54321 is started by the driver's control program.
+
+**RESULT:** `python3 tests/onrobot_modbus_grip.py status` connects (device id
+65) and reads live registers. **socat caveat:** open the pty ONCE per socat
+lifetime — the first open works, then socat locks the pty to the cabinet's 1M
+baud and a second open fails EINVAL. Relaunch the stack between test runs;
+real usage (connect once, hold the handle) is fine.
+
+**OPEN — register map (`wiki/rg6_rs485_modbus.md`).** The Compute-Box offsets
+were wrong for direct RTU. Live dump at unit 65: registers **263 & 264 = 1318**
+(≈ **131.8 mm** actual width — the real width field). Status/grip-detect/busy
+bit offsets still need pinning down. **Next: confirm by commanding a known
+width (Modbus write to regs 0-2 `[force×10, width×10, 1]`) and watching reg
+263 + the fingers move**, then hardcode the verified offsets into
+`onrobot_modbus_grip.py` (currently still using the wrong Compute-Box offsets
+ST_WIDTH=9/ST_STATUS=10 @258).
+
+**Pendant state for ROS gripper (the `ros` installation):** Tool I/O Controlled
+by User + Communication Interface (1M/Even/One) + Tool Output Voltage 24 +
+OnRobot Setup device None. The OnRobot **default** installation is UNTOUCHED —
+load it for the two URCap classes. The firewall + rs485-URCap additions are
+global but additive/harmless to those classes.
+
+**NOT yet done:** register-map finalize, an actual close/open on hardware,
+play_pickplace `--real-gripper` (modbus backend), commit+push of all this.
 
 ## CHECKPOINT — 2026-05-27 (late evening — pre-pendant offline work complete, ready for 2026-05-28 hardware test)
 

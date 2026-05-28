@@ -42,6 +42,13 @@ let it die in a chat transcript.
 - [Known bugs and workarounds (catalog)](known_bugs_and_workarounds.md) —
   living index of every "burnt by this" from the workspace. Future
   Claude sessions: search here first before re-discovering.
+- [RG6 + URCap hardware pitfalls + digital-control handoff](rg6_urcap_hardware_pitfalls.md) —
+  the 2026-05-28 cell session: digital tool-I/O `set_io` tripped
+  tool-connector overcurrent twice (sink on DO0, source on DO1), gripper
+  never moved. Root cause: gripper not in Teach mode (URCap holds the I/O
+  lines). URCap-handling gotchas, recovery from latched-output recurring
+  faults, and the handoff to retry digital control (hypothesis: uninstall
+  the URCap first). Decision: RS485/Modbus is the path.
 - [WSL2 networking deep-dive](../docs/WSL2_UR10e_NETWORKING.md) — fallback
   ladder (mirrored → bridged → NAT+portproxy → native Linux). Lives outside
   the wiki because it's a setup guide users follow step-by-step.

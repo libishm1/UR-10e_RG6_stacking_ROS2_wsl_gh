@@ -253,20 +253,53 @@ Full details in [`real_hw_connection.md`](real_hw_connection.md)
 
 ---
 
-## WSLg "pink window" after many launch cycles
+## WSLg RViz corrupts after many launch cycles (pink window / tiny stub window)
 
-**2026-05-26.** After ~10+ launch/relaunch cycles in a single session,
-RViz windows stop rendering — show a pink/purple gradient instead of
-the robot model. Bare `rviz2` (no config) also fails. WSLg's
-Qt+OpenGL state corrupts.
+**2026-05-26 / 2026-05-28.** After ~8-10+ launch/relaunch cycles in a single
+session, RViz stops rendering. Two observed manifestations, same root cause
+(WSLg's Qt+OpenGL state corrupts):
+- **Pink/purple gradient** instead of the robot model (2026-05-26).
+- **Tiny non-rendering stub window** — RViz opens a small window showing only
+  the app icon, no panels/3D view (2026-05-28, after many gripper-test
+  relaunches). GL itself is fine (`glxinfo` still shows D3D12, GL 4.1); it's
+  the Qt window/GL context that's wedged.
 
-**Workaround:** from PowerShell on Windows:
+Bare `rviz2` (no config) also fails once wedged.
+
+**Workaround (verified both times):** from PowerShell on Windows:
 ```powershell
 wsl --shutdown
 ```
-Wait 5 s, reopen WSL terminal. WSLg state resets cleanly. RViz works
-on the next launch. No workspace state lost; only the WSL kernel
-instance recycles.
+Wait ~5 s, reopen WSL terminal. WSLg state resets cleanly. RViz renders on the
+next launch. **No workspace state or files lost** — only running processes die
+(the ROS stack + any live hardware sessions) and the WSL kernel instance
+recycles. Re-launch the stack afterward.
+
+**Prevention / tip:** launch RViz from your OWN interactive WSL terminal, not
+from a detached one-shot (`setsid nohup` / `wsl.exe -- bash -c ...`) — a
+detached RViz window may not surface under WSLg. Use
+[`scripts/view_rviz.sh`](../scripts/view_rviz.sh) to bring RViz up attached in
+your terminal.
+
+---
+
+## RViz Fixed Frame "world" has no TF → robot invisible even when window renders
+
+**2026-05-28.** Distinct from the WSLg issue above: even with a healthy RViz
+window, the robot may not appear because `config/moveit.rviz` sets
+**Fixed Frame = `world`**, but **nothing publishes a `world → base_link`
+TF**. The SRDF defines a `world_to_base` virtual joint, but that is a MoveIt
+*planning* construct — `robot_state_publisher` only knows the URDF (rooted at
+`base_link`), and no `static_transform_publisher` for it exists in any launch
+file. So `world` is unresolvable and the RobotModel can't be placed.
+
+**Workarounds (either):**
+- Publish the transform: `ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 world base_link`
+  (done automatically by [`scripts/view_rviz.sh`](../scripts/view_rviz.sh)).
+- Or in RViz: Global Options → Fixed Frame → set to `base_link`.
+
+**Proper fix (TODO):** add the static `world → base_link` publisher to
+`full_stack.launch.py` so the planning frame `world` is always in TF.
 
 ---
 
