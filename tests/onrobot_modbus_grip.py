@@ -82,16 +82,20 @@ FN_WRITE_MULTIPLE = 0x10
 #     only. Also: before the FIRST grip command of a power cycle it reads
 #     garbage (~64404 -> "6440 mm"); valid only after a grip.
 #   - offset 5 is NOT width (ruled out earlier).
-# RELIABLE grip confirmation should come from the grip-detect STATUS bit, not
-# the width register. STILL UNCONFIRMED: status word offset (10) + busy/
-# grip-detect bit positions (offset 10 read 0 so far; not yet exercised on an
-# object). Confirm by reading during motion (busy) and while gripping a block.
+# GRIP-DETECT VERIFIED ON HARDWARE 2026-05-28 (status word @258 offset 10):
+#   close on a BLOCK   -> offset 10 == 1 (bit0)  = object gripped (force reached)
+#   close on NOTHING   -> offset 10 == 2 (bit1)  = position reached, no object
+# (controlled close-on-block vs close-on-empty at the same position cancels the
+#  position noise.) This matches OnRobot's "Force Reached vs Position Reached"
+#  DI feedback. So grip-detect = offset-10 bit0. NOTE bit0 can also be set
+#  transiently during motion, so check grip_detected() AFTER the move settles.
 CMD_ADDR = 0                 # write [force, width, control]
 STATUS_ADDR = 258            # read 18 words
 STATUS_COUNT = 18
-ST_WIDTH = 9                 # reg 267 = actual width (0.1 mm) — VERIFIED
-ST_STATUS = 10               # status bitfield — UNCONFIRMED (read 0 so far)
-BIT_BUSY = 1 << 0
+ST_WIDTH = 9                 # reg 267 = actual width (0.1 mm) — VERIFIED (non-linear)
+ST_STATUS = 10               # status bitfield — VERIFIED (grip-detect, see above)
+BIT_GRIP_DETECT = 1 << 0     # bit0: object gripped / force reached
+BIT_POSITION_REACHED = 1 << 1  # bit1: reached commanded position, no object
 BIT_GRIP_DETECT = 1 << 1
 
 CTRL_GRIP = 1
@@ -104,9 +108,6 @@ RG6_MIN_WIDTH_MM = 0.0
 # Safe/slow default: lower force = slower close (RG6 speed proportional to
 # force). Honours the project safe-default rule; bump only on explicit ask.
 DEFAULT_FORCE_N = 40.0
-
-MOTION_TIMEOUT_S = 4.0
-POLL_S = 0.05
 
 
 def _crc16(data: bytes) -> int:
@@ -234,29 +235,31 @@ class OnRobotModbusGrip:
         resp = self._txn(req, 8)
         return resp is not None
 
-    def _wait_done(self, timeout_s: float = MOTION_TIMEOUT_S) -> Optional[List[int]]:
-        start = time.time()
-        time.sleep(0.1)   # let the busy bit assert before polling for clear
-        last = None
-        while time.time() - start < timeout_s:
-            last = self._read_status()
-            if last is not None and not (last[ST_STATUS] & BIT_BUSY):
-                return last
-            time.sleep(POLL_S)
-        return last
+    def _wait_done(self, settle_s: float = 2.0) -> Optional[List[int]]:
+        # The RG6 completes a move in ~1 s. The status word has no clean "busy"
+        # bit (bit0 = open-or-holding, bit1 = closed-empty), so settle then read.
+        time.sleep(settle_s)
+        return self._read_status()
 
     # ---------- read API ----------
     def read_width_mm(self) -> Optional[float]:
         regs = self._read_status()
         return None if regs is None else regs[ST_WIDTH] / 10.0
 
-    def is_busy(self) -> bool:
+    def status_word(self) -> Optional[int]:
         regs = self._read_status()
-        return bool(regs is not None and (regs[ST_STATUS] & BIT_BUSY))
+        return None if regs is None else regs[ST_STATUS]
 
     def grip_detected(self) -> bool:
+        """True if an object is held. Only meaningful right AFTER a close: a
+        closed gripper reports bit0 (grip/force) when holding an object and
+        bit1 (position reached) when it closed on nothing. When OPEN, bit0 is
+        also set, so don't rely on this except just after close_blocking()."""
         regs = self._read_status()
-        return bool(regs is not None and (regs[ST_STATUS] & BIT_GRIP_DETECT))
+        if regs is None:
+            return False
+        st = regs[ST_STATUS]
+        return bool((st & BIT_GRIP_DETECT) and not (st & BIT_POSITION_REACHED))
 
     # ---------- motion API ----------
     def grip_to(self, width_mm: float, force_n: Optional[float] = None) -> Tuple[bool, str]:
@@ -269,8 +272,9 @@ class OnRobotModbusGrip:
         if regs is None:
             return True, f"commanded width={width_mm:.0f}mm (no status readback)"
         w = regs[ST_WIDTH] / 10.0
-        det = bool(regs[ST_STATUS] & BIT_GRIP_DETECT)
-        return True, f"width={w:.1f}mm grip_detected={det} force={f:.0f}N"
+        st = regs[ST_STATUS]
+        det = bool((st & BIT_GRIP_DETECT) and not (st & BIT_POSITION_REACHED))
+        return True, f"width={w:.1f}mm grip_detected={det} (status={st}) force={f:.0f}N"
 
     # ---------- drop-in compatibility with OnRobotToolIOGrip ----------
     def close_blocking(self, width_mm: float = 0.0,
@@ -303,7 +307,7 @@ def _main():
         sys.exit(3)
 
     if cmd == "status":
-        print(f"width={g.read_width_mm()} mm  busy={g.is_busy()}  "
+        print(f"width={g.read_width_mm()} mm  status_word={g.status_word()}  "
               f"grip_detected={g.grip_detected()}")
     elif cmd == "close":
         w = float(sys.argv[2]) if len(sys.argv) > 2 else 0.0

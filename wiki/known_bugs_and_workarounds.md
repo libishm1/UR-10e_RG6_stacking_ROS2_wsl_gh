@@ -67,12 +67,17 @@ launches separate from dashboard commands.
 
 **Calibration / status (2026-05-28):** cmd 160 → ~150 mm (mech max); cmd 0 →
 fully closed; `open()`=160 / `close_blocking()`=0 are the demo values. reg 267
-(@258 off 9) is width but NON-LINEAR vs fingertip gap — not exact mm. Status
-word @258 off 10: bit0 = BUSY (set during motion). **grip-detect bit NOT yet
-identified** — open→gripped register diffs are dominated by the position
-change, and the block falls out when the gripper opens, so a clean block-in vs
-block-out comparison at the same close width needs a FIXTURE to hold the block.
-TODO next session.
+(@258 off 9) is width but NON-LINEAR vs fingertip gap — not exact mm.
+
+**grip-detect — VERIFIED 2026-05-28.** Status word @258 **offset 10**:
+`bit0 (==1)` = object gripped (force reached); `bit1 (==2)` = closed on
+nothing (position reached). Found by resting the block ON THE TABLE (so it
+doesn't fall when the jaws open) and comparing **close-on-block** (off10=1) vs
+**close-on-empty** (off10=2) at the same close position — that cancels the
+position-change noise that swamped the in-jaw attempts. So after a close:
+`grip_detected = (off10 & 1) and not (off10 & 2)`. Caveat: bit0 is also set
+when the gripper is OPEN, so `grip_detected()` is only meaningful right after a
+close. Baked into `onrobot_modbus_grip.py` (`BIT_GRIP_DETECT`/`BIT_POSITION_REACHED`).
 
 ---
 
