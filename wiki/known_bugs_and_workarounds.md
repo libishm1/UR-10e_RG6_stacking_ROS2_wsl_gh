@@ -69,15 +69,19 @@ launches separate from dashboard commands.
 fully closed; `open()`=160 / `close_blocking()`=0 are the demo values. reg 267
 (@258 off 9) is width but NON-LINEAR vs fingertip gap — not exact mm.
 
-**grip-detect — VERIFIED 2026-05-28.** Status word @258 **offset 10**:
-`bit0 (==1)` = object gripped (force reached); `bit1 (==2)` = closed on
-nothing (position reached). Found by resting the block ON THE TABLE (so it
-doesn't fall when the jaws open) and comparing **close-on-block** (off10=1) vs
-**close-on-empty** (off10=2) at the same close position — that cancels the
-position-change noise that swamped the in-jaw attempts. So after a close:
-`grip_detected = (off10 & 1) and not (off10 & 2)`. Caveat: bit0 is also set
-when the gripper is OPEN, so `grip_detected()` is only meaningful right after a
-close. Baked into `onrobot_modbus_grip.py` (`BIT_GRIP_DETECT`/`BIT_POSITION_REACHED`).
+**grip-detect — NOT reliably verified (EXPERIMENTAL).** An initial run looked
+clean (close-on-block → status word @258 off10 = 1; close-on-empty → off10 = 2)
+but a later **full** empty close also read **off10 = 1** — the same bit as a
+real grip. So **off10 bit0 is NOT a clean grip flag** (it's set for a full
+empty close too), and bit1 seems tied to *where* the jaws stopped, not to
+holding an object. The earlier "clean" comparison had both closes stopping at
+~60 mm (likely the block present in both), which is why it looked decisive.
+**Until re-tested with a fixture holding a known-width object** (compare the
+full 18-word status block at the SAME commanded+actual width), judge a grip
+from the **WIDTH** (off9 stopping short of full close), not from
+`grip_detected()` — which is left in `onrobot_modbus_grip.py` as an EXPERIMENTAL
+heuristic. (A duplicate `BIT_GRIP_DETECT` line had also silently forced it to
+bit1; fixed.)
 
 ---
 

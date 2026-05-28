@@ -38,6 +38,7 @@ socat note: the driver's socat uses `waitslave`, so OPEN THE PORT ONCE and
 keep it open for the whole session (connect() does this). Repeatedly
 opening/closing the pty can degrade socat — connect once, reuse the handle.
 """
+import os
 import struct
 import time
 from typing import List, Optional, Tuple
@@ -82,21 +83,24 @@ FN_WRITE_MULTIPLE = 0x10
 #     only. Also: before the FIRST grip command of a power cycle it reads
 #     garbage (~64404 -> "6440 mm"); valid only after a grip.
 #   - offset 5 is NOT width (ruled out earlier).
-# GRIP-DETECT VERIFIED ON HARDWARE 2026-05-28 (status word @258 offset 10):
-#   close on a BLOCK   -> offset 10 == 1 (bit0)  = object gripped (force reached)
-#   close on NOTHING   -> offset 10 == 2 (bit1)  = position reached, no object
-# (controlled close-on-block vs close-on-empty at the same position cancels the
-#  position noise.) This matches OnRobot's "Force Reached vs Position Reached"
-#  DI feedback. So grip-detect = offset-10 bit0. NOTE bit0 can also be set
-#  transiently during motion, so check grip_detected() AFTER the move settles.
+# GRIP-DETECT (status word @258 offset 10): NOT RELIABLY VERIFIED — EXPERIMENTAL.
+#   Observed, but INCONSISTENT across runs:
+#     close on BLOCK (~60 mm)       -> off10 = 1 (bit0)
+#     close on NOTHING (~60 mm stop) -> off10 = 2 (bit1)   [looked like grip vs not]
+#     close on NOTHING (full ~10 mm) -> off10 = 1 (bit0)   [contradicts the above]
+#   So bit0 is set for BOTH a real grip AND a full empty close → it is NOT a
+#   clean grip-detect flag, and bit1 seems tied to *where* the jaws stopped, not
+#   to holding an object. grip_detected() below is a best-effort heuristic only.
+#   TODO: re-test with a FIXTURE holding a known-width object and compare the
+#   full 18-word status block at the SAME commanded+actual width. Until then,
+#   trust the WIDTH (off9) + your eyes, not grip_detected(). See known_bugs.
 CMD_ADDR = 0                 # write [force, width, control]
 STATUS_ADDR = 258            # read 18 words
 STATUS_COUNT = 18
 ST_WIDTH = 9                 # reg 267 = actual width (0.1 mm) — VERIFIED (non-linear)
-ST_STATUS = 10               # status bitfield — VERIFIED (grip-detect, see above)
-BIT_GRIP_DETECT = 1 << 0     # bit0: object gripped / force reached
-BIT_POSITION_REACHED = 1 << 1  # bit1: reached commanded position, no object
-BIT_GRIP_DETECT = 1 << 1
+ST_STATUS = 10               # status bitfield — semantics NOT pinned (see above)
+BIT_GRIP_DETECT = 1 << 0     # bit0 (EXPERIMENTAL — also set on a full empty close)
+BIT_POSITION_REACHED = 1 << 1  # bit1 (seen on a partial-stop close)
 
 CTRL_GRIP = 1
 CTRL_STOP = 8
@@ -135,11 +139,14 @@ class OnRobotModbusGrip:
 
     def __init__(self, node=None, port: str = DEFAULT_PORT,
                  device_id: int = DEVICE_ID,
-                 default_force_n: float = DEFAULT_FORCE_N):
+                 default_force_n: float = DEFAULT_FORCE_N,
+                 robot_ip: str = "192.168.1.100", tool_comm_port: int = 54321):
         self._node = node
         self._port = port
         self._device_id = device_id
         self._default_force_n = default_force_n
+        self._robot_ip = robot_ip
+        self._tool_comm_port = tool_comm_port
         self._ser = None
 
     def _log(self, msg: str, level: str = "info"):
@@ -147,6 +154,45 @@ class OnRobotModbusGrip:
             getattr(self._node.get_logger(), level)(msg)
         else:
             print(msg)
+
+    def reset_socat(self):
+        """Kill the (likely pty-locked) socat for our device and start a fresh
+        one. socat's `waitslave` locks the pty after ONE open/close, so a CLI
+        tool that runs as a new process each time needs a fresh socat. NOTE: do
+        NOT call this inside a long-lived process (e.g. play_pickplace) that
+        connect()s once and reuses the handle — only for standalone CLI use.
+        Uses /proc (not pkill -f, which self-matches) and matches a cmdline
+        that STARTS WITH 'socat' (so it never kills the bash/python wrapper)."""
+        import subprocess
+        import re
+        tail = os.path.basename(self._port)   # e.g. "ttyUR"
+        me = os.getpid()
+        target = "tcp:%s:%d" % (self._robot_ip, self._tool_comm_port)  # fallback
+        victims = []
+        for p in os.listdir("/proc"):
+            if not p.isdigit() or int(p) == me:
+                continue
+            try:
+                c = open("/proc/" + p + "/cmdline", "rb").read().decode(
+                    "utf8", "ignore").replace(chr(0), " ").strip()
+                if c.startswith("socat") and tail in c:
+                    m = re.search(r"tcp:[0-9.]+:[0-9]+", c)
+                    if m:
+                        target = m.group(0)   # reuse running target (right IP/port)
+                    victims.append(int(p))
+            except Exception:
+                pass
+        for pid in victims:
+            try:
+                os.kill(pid, 9)
+            except Exception:
+                pass
+        time.sleep(1)
+        subprocess.Popen(
+            ["socat", "pty,link=%s,raw,ignoreeof,waitslave" % self._port, target],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True)
+        time.sleep(2)
 
     # ---------- connection ----------
     def connect(self, timeout_s: float = 5.0) -> bool:
@@ -235,11 +281,27 @@ class OnRobotModbusGrip:
         resp = self._txn(req, 8)
         return resp is not None
 
-    def _wait_done(self, settle_s: float = 2.0) -> Optional[List[int]]:
-        # The RG6 completes a move in ~1 s. The status word has no clean "busy"
-        # bit (bit0 = open-or-holding, bit1 = closed-empty), so settle then read.
-        time.sleep(settle_s)
-        return self._read_status()
+    def _wait_done(self, timeout_s: float = 6.0, stall_s: float = 0.6) -> Optional[List[int]]:
+        # Motion-complete = the actual width (reg 267) stops changing. This
+        # adapts to fast grips (small travel) and slow full-strokes at low force
+        # (RG6 speed is proportional to force), so the returned width +
+        # grip_detected are final. The status word has no clean "busy" bit
+        # (bit0 = open-or-holding, bit1 = closed-empty), so we can't use it here.
+        last_w = None
+        last_change = time.time()
+        start = time.time()
+        regs = None
+        while time.time() - start < timeout_s:
+            regs = self._read_status()
+            if regs is not None:
+                w = regs[ST_WIDTH]
+                if last_w is None or abs(w - last_w) > 3:   # moved >0.3 mm
+                    last_w = w
+                    last_change = time.time()
+                elif time.time() - last_change > stall_s:
+                    return regs                              # width stalled → done
+            time.sleep(0.1)
+        return regs
 
     # ---------- read API ----------
     def read_width_mm(self) -> Optional[float]:
@@ -251,10 +313,11 @@ class OnRobotModbusGrip:
         return None if regs is None else regs[ST_STATUS]
 
     def grip_detected(self) -> bool:
-        """True if an object is held. Only meaningful right AFTER a close: a
-        closed gripper reports bit0 (grip/force) when holding an object and
-        bit1 (position reached) when it closed on nothing. When OPEN, bit0 is
-        also set, so don't rely on this except just after close_blocking()."""
+        """EXPERIMENTAL — do NOT trust yet. The status-word semantics aren't
+        pinned (bit0 is also set on a full empty close), so this can false-
+        positive. Prefer judging a grip from the WIDTH (read_width_mm stopping
+        short of full close on an object). See the register-map note above /
+        known_bugs. Kept so the value is exposed once the semantics are nailed."""
         regs = self._read_status()
         if regs is None:
             return False
@@ -274,7 +337,8 @@ class OnRobotModbusGrip:
         w = regs[ST_WIDTH] / 10.0
         st = regs[ST_STATUS]
         det = bool((st & BIT_GRIP_DETECT) and not (st & BIT_POSITION_REACHED))
-        return True, f"width={w:.1f}mm grip_detected={det} (status={st}) force={f:.0f}N"
+        return True, (f"width={w:.1f}mm status={st} (grip_detected={det}, "
+                      f"EXPERIMENTAL) force={f:.0f}N")
 
     # ---------- drop-in compatibility with OnRobotToolIOGrip ----------
     def close_blocking(self, width_mm: float = 0.0,
@@ -288,7 +352,8 @@ class OnRobotModbusGrip:
         return self.grip_to(width_mm, force_n)
 
 
-# Standalone harness (driver must be up with use_tool_communication + 54321 open):
+# Standalone harness (driver must be up with use_tool_communication + 54321 open
+# + external_control.urp PLAYING). Resets socat each run so it works repeatedly:
 #   python3 tests/onrobot_modbus_grip.py status
 #   python3 tests/onrobot_modbus_grip.py close [width_mm] [force_n]
 #   python3 tests/onrobot_modbus_grip.py open  [width_mm]
@@ -302,8 +367,12 @@ def _main():
     cmd = sys.argv[1]
 
     g = OnRobotModbusGrip()
+    # CLI runs as a fresh process each time → swap in a fresh socat (the pty
+    # locks after one open/close). Long-lived users (play_pickplace) skip this.
+    g.reset_socat()
     if not g.connect():
-        print("CONNECT FAILED — see message above.")
+        print("CONNECT FAILED — see message above. (stack up? URP playing? "
+              "rs485 daemon healthy? if reads are None, restart PolyScope.)")
         sys.exit(3)
 
     if cmd == "status":
