@@ -1,8 +1,61 @@
 # UR10e + RG6 — Session Handoff
 
-Last updated: 2026-05-28 (cell session — RS485/Modbus gripper path: live comms achieved). Read this first; it covers the current state and how to pick up where we left off.
+Last updated: 2026-05-28 (cell session END — RG6 gripper over ROS fully working: open/close/grip-detect via RS485/Modbus). Read this first.
 
-> **Going to the cell tomorrow?** Use [`HARDWARE_TEST_HANDOFF.md`](HARDWARE_TEST_HANDOFF.md) — it's the step-by-step procedure with acceptance criteria at each step. The checkpoints below are background context.
+> **Going to the cell next time?** Use [`HARDWARE_TEST_HANDOFF.md`](HARDWARE_TEST_HANDOFF.md) for the arm-motion procedure. For the gripper, just `bash scripts/grip.sh {open|close|status}`.
+
+## CHECKPOINT — 2026-05-28 (END OF SESSION — RG6 gripper over ROS WORKING)
+
+**Headline:** the OnRobot RG6 is now fully driveable + sensable from ROS over
+the UR tool-flange RS485 (Modbus). The digital tool-I/O path was abandoned
+(overcurrent — see [`rg6_urcap_hardware_pitfalls.md`](wiki/rg6_urcap_hardware_pitfalls.md)).
+RViz-under-WSLg was also fixed. Everything below is committed + pushed
+(latest `a82cf90`; arc `6876cc1`→`a82cf90`).
+
+### What works now
+- **`scripts/grip.sh {open|close|status|cycle}`** — standalone gripper control,
+  NO Claude Code. Auto-swaps a fresh socat each run (beats the pty-lock) and
+  waits for the width to STALL before reporting.
+- **Calibration:** cmd 160 → ~150 mm open (mech max); cmd 0 → fully closed.
+- **Grip-detect via WIDTH (verified):** an object is held if the jaws stop
+  >15 mm short of the commanded width (block grips ~60 mm; empty closes ~10 mm).
+  The status word @258 off10 is NOT grip-detect (reads the same gripped vs
+  empty). `tests/onrobot_modbus_grip.py` `grip_detected()`/`grip_to()` use width.
+- **Register map** (unit 65): write @0 `[force×10, width×10, 1]`; read @258,
+  off9 = actual width (non-linear vs gap). Setup: [`rg6_rs485_modbus.md`](wiki/rg6_rs485_modbus.md).
+- **RViz under WSLg:** `world→base_link` static TF now in `full_stack.launch.py`
+  (Fixed Frame `world` resolves); `scripts/view_rviz.sh` launches one attached
+  window. Tiny/stub windows after many relaunches = WSLg wedged → `wsl --shutdown`.
+
+### Bring the gripper online (each session)
+1. `bash scripts/launch_real_rs485.sh`  (stack + tool-RS485 bridge; needs `socat`)
+2. Pendant: load the **`ros`** installation (Tool I/O User + Communication
+   Interface + 24 V + OnRobot device None), **Play `external_control.urp`**
+   (Remote Control). The rs485 bridge runs inside the control program, so the
+   URP MUST be playing or the gripper is unreachable.
+3. `bash scripts/grip.sh open` / `close` / `status`.
+
+### Hard-won gotchas (all in known_bugs_and_workarounds.md)
+- **rs485 daemon wedges** after `wsl --shutdown` / **admin-mode WSL** → Modbus
+  reads return None even with 54321 open. Replaying External Control does NOT
+  fix it → **restart PolyScope**. Use a NORMAL (non-admin) WSL terminal.
+- **socat pty locks** after one open/close → `reset_socat()` (grip.sh does it).
+- **Cabinet firewall**: port **54321** must be allowed (Settings → Security).
+- **rs485 URCap** required + installed at `/root/.urcaps/rs485-1.0.jar`
+  (coexists with the OnRobot URCap).
+- **kill_ros self-kill**: don't run a launch script in the same shell as a
+  command containing `dashboard_client` (kill_ros pkills it → exit 9).
+
+### NOT YET DONE / next session
+- **`play_pickplace.py --max 4 --real-gripper`** — full arm+gripper cycle on
+  real hw (arm moves; hand on E-stop; verify the +45 mm Z calib at PLACE).
+- **Re-apply the vendored edits after any `vcs import`** (both live in NESTED
+  vendor git repos, so NOT in this repo): tool-comm args in
+  `src/onrobot1_ros/.../ur10e_rg6_control.launch.py`, and the RTDE-rate yaml in
+  `src/Universal_Robots_ROS2_Driver/...`.
+- Real-hw RViz confirm (sim RViz confirmed working after `wsl --shutdown`).
+
+---
 
 ## CHECKPOINT — 2026-05-28 (cell session — RG6 over RS485/Modbus: LIVE COMMS, register-map confirm pending)
 
