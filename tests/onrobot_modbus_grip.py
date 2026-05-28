@@ -68,18 +68,24 @@ FN_WRITE_MULTIPLE = 0x10
 
 # --- register map ---
 # VERIFIED ON HARDWARE 2026-05-28 (unit 65, read @258):
-#   - WRITE @0 [force*10, width*10, 1] physically moves the gripper. CONFIRMED
-#     (commanded 80 mm; fingers moved; tape ~70 mm).
-#   - offset 9 (reg 267) = ACTUAL WIDTH. After the 80 mm command it read 812
-#     (81.2 mm), matching the command + the ~70 mm tape (≈11 mm fingertip
-#     offset — calibrate later if needed). NOTE: before the FIRST grip command
-#     of a power cycle, offset 9 reads garbage (~64404 → "6440 mm"); it only
-#     becomes valid after a grip. So a fresh connect() may log a bogus width
-#     until the first grip_to().
-#   - offset 5 is NOT width (read 8.6 mm at the same time → ruled out).
-# STILL UNCONFIRMED: status word offset (10) + the busy/grip-detect bit
-#   positions. Offset 10 read 0 both before/after; bits not yet exercised.
-#   Confirm by reading during motion (busy) and on an object (grip-detect).
+#   - WRITE @0 [force*10, width*10, 1] physically moves the gripper. CONFIRMED.
+#   - COMMANDS WORK: cmd 160 -> full open (~150 mm, mechanical max per tape);
+#     cmd 0 -> fully closed (0 mm per tape). So open()=160 / close_blocking()=0
+#     are the calibrated demo values. With the ~50 mm wood block present, a
+#     close-to-0 at force stops on the block and holds.
+#   - offset 9 (reg 267) TRACKS position but is NON-LINEAR vs the physical
+#     fingertip gap (the RG6 fingers PIVOT, so the internal metric != gap):
+#       cmd 160 / 150 mm tape -> reg 160.2
+#       cmd 0   /   0 mm tape -> reg  64.6
+#     i.e. reg ranges ~65 (closed) .. ~160 (open) over a 0..150 mm physical
+#     range. DO NOT treat reg 267 as exact mm — use it for relative feedback
+#     only. Also: before the FIRST grip command of a power cycle it reads
+#     garbage (~64404 -> "6440 mm"); valid only after a grip.
+#   - offset 5 is NOT width (ruled out earlier).
+# RELIABLE grip confirmation should come from the grip-detect STATUS bit, not
+# the width register. STILL UNCONFIRMED: status word offset (10) + busy/
+# grip-detect bit positions (offset 10 read 0 so far; not yet exercised on an
+# object). Confirm by reading during motion (busy) and while gripping a block.
 CMD_ADDR = 0                 # write [force, width, control]
 STATUS_ADDR = 258            # read 18 words
 STATUS_COUNT = 18
