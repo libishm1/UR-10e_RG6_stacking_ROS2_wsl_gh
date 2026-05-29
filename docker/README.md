@@ -101,6 +101,37 @@ To skip the auto-build entirely:
 SKIP_BUILD=1 docker compose -f docker/docker-compose.yml run --rm shell
 ```
 
+## GPU / CUDA in containers (optional)
+
+**ROS 2 + MoveIt + the pick-and-place do NOT need a GPU** — skip this unless you
+are adding CUDA compute (perception, ML, GPU nodes). RViz rendering goes through
+WSLg (Intel iGPU here), *not* the NVIDIA card, in or out of a container.
+
+To expose the NVIDIA GPU to a container you need the **NVIDIA Container Toolkit**
+on the WSL host (Docker Desktop + the NVIDIA Windows driver usually wires this up
+already — `docker info` lists the `nvidia` runtime if so):
+
+```bash
+# host (WSL), only if the nvidia runtime is missing:
+sudo apt-get install -y nvidia-container-toolkit
+sudo nvidia-ctk runtime configure --runtime=docker
+# verify GPU reaches a container:
+docker run --rm --gpus all nvidia/cuda:11.7.1-base-ubuntu22.04 nvidia-smi
+```
+
+Run a service with the GPU via `--gpus all`, or add a compose reservation:
+```yaml
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+```
+
+Full host/WSL CUDA setup + verified versions: [`../REQUIREMENTS.md`](../REQUIREMENTS.md).
+
 ## Connecting Rhino/Grasshopper
 
 1. `docker compose -f docker/docker-compose.yml up rosbridge`

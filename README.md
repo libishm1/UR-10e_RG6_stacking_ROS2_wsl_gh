@@ -70,6 +70,8 @@ More: [`scripts/README.md`](scripts/README.md) (flows, flags) ·
 [`HARDWARE_TEST_HANDOFF.md`](HARDWARE_TEST_HANDOFF.md) (step-by-step hw runbook).
 
 Background reading:
+- [`REQUIREMENTS.md`](REQUIREMENTS.md) — hardware requirements, verified
+  software versions, and GPU/CUDA setup for WSL + Docker.
 - [`SESSION_HANDOFF.md`](SESSION_HANDOFF.md) — full project state, design
   decisions, calibration values.
 - [`LAUNCH_RUNBOOK.md`](LAUNCH_RUNBOOK.md) — manual launch sequence for when
