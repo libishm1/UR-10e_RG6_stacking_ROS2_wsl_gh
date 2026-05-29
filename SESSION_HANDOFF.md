@@ -54,14 +54,40 @@ RViz-under-WSLg was also fixed. Everything below is committed + pushed
   `src/onrobot1_ros/.../ur10e_rg6_control.launch.py`, and the RTDE-rate yaml in
   `src/Universal_Robots_ROS2_Driver/...`.
 - Real-hw RViz confirm (sim RViz confirmed working after `wsl --shutdown`).
-- **MODEL THE ONROBOT QUICK CHANGER in the URDF.** Currently `rg6_bracket`
-  mounts straight onto `tool0` (`rg6_mount_joint`, origin 0) — the Quick
-  Changer block (~50 mm) between flange and bracket is NOT modelled, so the
-  collision volume near the wrist is under-represented. Dimensions TBD (user to
-  measure). When adding it, **preserve the calibrated 0.279 m total tool0→
-  rg6_tcp offset** or the kinematics (0.4 mm vs cabinet) shift. See the TODO
-  comment at `rg6_mount_joint` in `ur10e_rg6.urdf.xacro`. Ref:
-  D:\\robot_ws TCP `p[0,0,0.2786,...]`.
+- **MODEL THE ONROBOT QUICK CHANGER as a BOX placeholder in the URDF.**
+  Currently `rg6_bracket` mounts straight onto `tool0` (`rg6_mount_joint`,
+  origin 0) — the Quick Changer block (~50 mm) between flange and bracket is NOT
+  modelled, so the collision volume near the wrist is under-represented.
+  **Detailed plan (analysis done 2026-05-29, NOT yet implemented; user said
+  "skip for now"):**
+  - File: `src/Universal_Robots_ROS2_Description/urdf/ur10e_rg6.urdf.xacro`,
+    the RG6 mount block ~lines 126-183.
+  - Current chain (verified vs cabinet to 0.4 mm):
+    `tool0 →(0)→ rg6_bracket →(0.051)→ rg6_body →(0.228)→ rg6_tcp` = **0.279 m**.
+  - (1) Add xacro property `qc_height=0.050` — **PLACEHOLDER ESTIMATE** (OnRobot
+    Single Quick Changer ≈ Ø63 mm × ~50 mm; **user to measure** the real value).
+  - (2) Add a new `quick_changer` link with a **box** visual + collision
+    ~`0.063 × 0.063 × qc_height`, visual/collision `<origin>` at `z=qc_height/2`
+    (box spans tool0 face down to the bracket).
+  - (3) Re-wire the chain so the TCP is preserved **by construction**:
+    `rg6_mount_joint` → `tool0`→`quick_changer` (z=0); NEW joint
+    `quick_changer`→`rg6_bracket` (z=`qc_height`); `rg6_body_joint` unchanged
+    (z=0.051); `rg6_grasp_frame_joint` z = `${0.279 - 0.051 - qc_height}` = 0.178.
+    Total stays **exactly 0.279 m** regardless of the chosen `qc_height`.
+  - (4) Side effect (acceptable): the gripper body+fingers shift down by
+    `qc_height` and the TCP moves *up* the jaws by the same amount. Since the old
+    grasp 0.228 was already a **+0.038 m calibration fudge** over the real onrobot
+    geometric ~0.190 m, shrinking to 0.178 actually places the TCP *nearer the
+    jaws* (better, not worse).
+  - (5) **MUST also edit the SRDF:** add `disable_collisions` for `quick_changer`
+    ↔ `tool0` / `wrist_3_link` / `rg6_bracket` / `rg6_body` in
+    `src/ur10e_rg6_moveit_config/config/ur10e_rg6.srdf` (mirror the existing
+    `rg6_bracket` entries) — otherwise the planner treats the QC as permanently
+    colliding with the wrist and motion plans fail.
+  - **Verify:** `bash scripts/launch_sim.sh`, then
+    `ros2 run tf2_ros tf2_echo tool0 rg6_tcp` must still report z ≈ **0.279**;
+    confirm the box is visible in RViz.
+  - Ref: D:\\robot_ws TCP `p[0,0,0.2786,...]`; TODO comment at `rg6_mount_joint`.
 
 ### Sim notes (verified 2026-05-29)
 - `bash scripts/launch_sim.sh` + `play_pickplace.sh --max 4` runs clean after
