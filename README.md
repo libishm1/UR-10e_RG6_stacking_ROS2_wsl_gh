@@ -6,30 +6,68 @@ simulation with visualised box stacking.
 
 <img width="800" height="600" alt="ros_resized" src="https://github.com/user-attachments/assets/e9eb7a84-4d89-4c94-bcba-aea8f4069cce" />
 
-## Quick start (operator scripts)
+## Command cheat-sheet (operator quick reference)
 
-The supported entry point is the `scripts/` folder. Each script is
-idempotent, kills leftover ROS first to avoid duplicate RViz, and
-prints what to do next.
+Run everything from the workspace root in a **normal (non-admin) WSL terminal**.
+The `scripts/*.sh` launchers kill leftover ROS/socat first (no duplicate RViz),
+so you rarely call `kill_ros.sh` yourself.
 
+### Simulation (no hardware)
 ```bash
-# Simulation (RViz only — no hardware required)
-bash scripts/launch_sim.sh                       # bring up MoveIt + ros2_control mock
-bash scripts/play_pickplace.sh --max 4           # 2 full pick+place cycles
-bash scripts/kill_ros.sh                         # tear down
+cd ~/ur_rg6_ws
+bash scripts/launch_sim.sh                 # MoveIt + mock hardware + RViz
+# wait ~10 s for controllers to go active (else the first move CONTROL_FAILEDs)
+bash scripts/play_pickplace.sh --max 4     # 2 pick-place cycles (sim gripper)
+bash scripts/view_rviz.sh                  # (optional) single attached RViz window
+bash scripts/kill_ros.sh                   # stop everything
+```
 
-# Real hardware (cabinet at 192.168.1.100; see HARDWARE_TEST_HANDOFF.md
-# for pendant prereqs the first time you run on a fresh setup)
-bash scripts/launch_real.sh                      # ping + RTDE probe + launch
-# … load external_control.urp on pendant, press Play, switch to Remote Control …
-bash scripts/play_pickplace.sh --max 4 --real-gripper   # 2 cycles with real RG6
+### Real hardware — full pick-place (arm + RG6 gripper)
+```bash
+cd ~/ur_rg6_ws
+bash scripts/launch_real_rs485.sh          # arm stack + tool-RS485 gripper bridge
+#  On the pendant: load the `ros` installation, then Play external_control.urp
+#  in Remote Control mode. REQUIRED — the gripper bridge runs in that program.
+bash scripts/play_pickplace.sh --max 4 --real-gripper
 bash scripts/kill_ros.sh
 ```
 
-See [`scripts/README.md`](scripts/README.md) for the full operator
-reference (flows, gotchas, flag list). For a step-by-step
-hardware-test runbook (with acceptance criteria at each step), see
-[`HARDWARE_TEST_HANDOFF.md`](HARDWARE_TEST_HANDOFF.md).
+### Real hardware — arm only (no gripper)
+```bash
+cd ~/ur_rg6_ws
+bash scripts/launch_real.sh                # ping + RTDE probe + launch
+#  Pendant: Play external_control.urp, Remote Control mode
+bash scripts/play_pickplace.sh --max 4
+bash scripts/kill_ros.sh
+```
+
+### Gripper alone — open / close / status (no arm, no Claude)
+Needs the stack up via `launch_real_rs485.sh` **with `external_control.urp` playing**:
+```bash
+cd ~/ur_rg6_ws
+bash scripts/grip.sh open            # open ~150 mm
+bash scripts/grip.sh close           # close / grip object at 40 N
+bash scripts/grip.sh close 30 60     # close to 30 mm at 60 N
+bash scripts/grip.sh status          # width + grip_detected
+bash scripts/grip.sh cycle           # close then open
+```
+An object is "gripped" when the jaws stop short of the commanded width.
+
+### Stop · build · recover
+```bash
+bash scripts/kill_ros.sh             # hard-stop all ROS + socat (idempotent)
+colcon build --symlink-install       # only after C++/xacro changes
+```
+- **RViz is a tiny/blank stub, or the gripper Modbus returns nothing** → WSLg or
+  the cabinet's rs485 daemon is wedged (often after `wsl --shutdown` or an
+  **admin-mode** WSL session). Fix: `wsl --shutdown` in **PowerShell**, reopen a
+  **non-admin** WSL terminal; if the gripper still won't talk, **restart
+  PolyScope** and reload the `ros` installation.
+
+More: [`scripts/README.md`](scripts/README.md) (flows, flags) ·
+[`wiki/rg6_rs485_modbus.md`](wiki/rg6_rs485_modbus.md) (gripper/RS485 setup) ·
+[`wiki/known_bugs_and_workarounds.md`](wiki/known_bugs_and_workarounds.md) (gotchas) ·
+[`HARDWARE_TEST_HANDOFF.md`](HARDWARE_TEST_HANDOFF.md) (step-by-step hw runbook).
 
 Background reading:
 - [`SESSION_HANDOFF.md`](SESSION_HANDOFF.md) — full project state, design
