@@ -54,6 +54,22 @@ RViz-under-WSLg was also fixed. Everything below is committed + pushed
   `src/onrobot1_ros/.../ur10e_rg6_control.launch.py`, and the RTDE-rate yaml in
   `src/Universal_Robots_ROS2_Driver/...`.
 - Real-hw RViz confirm (sim RViz confirmed working after `wsl --shutdown`).
+- **MODEL THE ONROBOT QUICK CHANGER in the URDF.** Currently `rg6_bracket`
+  mounts straight onto `tool0` (`rg6_mount_joint`, origin 0) — the Quick
+  Changer block (~50 mm) between flange and bracket is NOT modelled, so the
+  collision volume near the wrist is under-represented. Dimensions TBD (user to
+  measure). When adding it, **preserve the calibrated 0.279 m total tool0→
+  rg6_tcp offset** or the kinematics (0.4 mm vs cabinet) shift. See the TODO
+  comment at `rg6_mount_joint` in `ur10e_rg6.urdf.xacro`. Ref:
+  D:\\robot_ws TCP `p[0,0,0.2786,...]`.
+
+### Sim notes (verified 2026-05-29)
+- `bash scripts/launch_sim.sh` + `play_pickplace.sh --max 4` runs clean after
+  all the edits (2 cycles: grip 50 mm → attach → lift → place → release → detach).
+- **Wait ~10 s after `launch_sim.sh` before `play_pickplace.sh`** — running it
+  the instant move_group appears (before the controllers go active) gives a
+  `CONTROL_FAILED` on the first move. (Launch from your own WSL terminal, not a
+  detached one-shot, or the RViz window won't surface — WSLg quirk.)
 
 ---
 

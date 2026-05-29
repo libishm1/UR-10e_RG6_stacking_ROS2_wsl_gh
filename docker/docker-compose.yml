@@ -3,7 +3,7 @@
 #   docker compose -f docker/docker-compose.yml build ur10e_rg6
 #   docker compose -f docker/docker-compose.yml up rviz_view
 #   docker compose -f docker/docker-compose.yml up ur_fake
-#   ROBOT_IP=192.168.1.102 docker compose -f docker/docker-compose.yml up ur_real
+#   ROBOT_IP=192.168.1.100 docker compose -f docker/docker-compose.yml up ur_real
 #   docker compose -f docker/docker-compose.yml up rosbridge
 
 services:
@@ -99,7 +99,7 @@ services:
     environment:
       - DISPLAY=${DISPLAY:-:0}
       - QT_X11_NO_MITSHM=1
-      - ROBOT_IP=${ROBOT_IP:-192.168.1.102}
+      - ROBOT_IP=${ROBOT_IP:-192.168.1.100}
       - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}
       - XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir
     volumes:
@@ -107,7 +107,7 @@ services:
       - /tmp/.X11-unix:/tmp/.X11-unix:ro
       - /mnt/wslg:/mnt/wslg
     command: >
-      bash -lc "ros2 launch onrobot_description ur10e_rg6_control.launch.py use_fake_hardware:=false robot_ip:=${ROBOT_IP:-192.168.1.102}"
+      bash -lc "ros2 launch onrobot_description ur10e_rg6_control.launch.py use_fake_hardware:=false robot_ip:=${ROBOT_IP:-192.168.1.100}"
 
   # 4. rosbridge_server so Rhino/Grasshopper (roslibpy) can talk to ROS 2
   rosbridge:

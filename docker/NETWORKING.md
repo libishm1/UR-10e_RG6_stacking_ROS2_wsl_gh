@@ -13,7 +13,7 @@ pain they save you.
 3. Open a new WSL terminal: `wsl -d Ubuntu-22.04`
 4. Verify: from WSL run `ip addr` — you should see your Windows Ethernet
    interfaces (Ethernet, Wi-Fi) listed, not just the old `eth0` NAT adapter.
-5. From WSL: `ping 192.168.1.102` (or whatever your UR10e's IP is).
+5. From WSL: `ping 192.168.1.100` (or whatever your UR10e's IP is).
 
 That's it. The container's `network_mode: host` now sees the WSL distro,
 which mirrors Windows's NICs — so the container can speak to the UR
@@ -57,14 +57,14 @@ ip addr             # should list Ethernet / Wi-Fi adapters, not the old eth0 NA
 The physical UR10e ping should now succeed:
 
 ```bash
-ping -c 3 192.168.1.102
+ping -c 3 192.168.1.100
 ```
 
 If a ROS 2 container is up with `network_mode: host`, this command from
 inside the container has the same result:
 
 ```bash
-docker compose -f docker/docker-compose.yml run --rm shell -- ping -c 3 192.168.1.102
+docker compose -f docker/docker-compose.yml run --rm shell -- ping -c 3 192.168.1.100
 ```
 
 ## Option B — Hyper-V bridged switch (older Windows 10 / WSL 1.x fallback)
@@ -109,11 +109,42 @@ side. You cannot portproxy outbound; the UR will still be unreachable.
 - Dedicated Ethernet port on the PC, straight cable to the UR control box.
   Don't route through office routers or Wi-Fi — RTDE drops packets and the
   controller faults.
-- Static IPs on the same subnet:
-  - PC: `192.168.1.100`
-  - UR10e: `192.168.1.102`
+- Static IPs on the same subnet (VERIFIED cell config — do not invent others):
+  - PC (laptop): `192.168.1.35`
+  - UR10e cabinet: `192.168.1.100`
 - On the UR teach pendant: *Settings → Network → DHCP off; Static IP*.
-- From your shell, `ping 192.168.1.102` should answer in < 0.5 ms.
+- From your shell, `ping 192.168.1.100` should answer in < 0.5 ms.
+
+## UR cabinet ports + the RG6 gripper over RS485 (2026-05-28)
+
+Beyond plain reachability, the cabinet's own **Security firewall** gates which
+TCP ports answer. Two things must be set on the pendant
+(*Settings → Security*), or you'll get `connection refused` despite a good ping:
+
+- **Enable all 5 robot services** (29999 dashboard, 30001–30004 primary/RTDE,
+  + the 50001–50004 external-control ports). They ship DISABLED.
+- **Inbound port allow-list** (*Security → General*): non-standard ports are
+  blocked. The **RG6 gripper tool-communication uses port `54321`**, so it must
+  be ADDED to the allowed inbound ports — otherwise the host can't reach the
+  rs485 daemon even though it's listening. (We changed the disabled range to
+  `1-21,23-54320,54322-65535`, i.e. allow 22 + 54321.)
+
+**How the gripper talks (RS485/Modbus, NOT the old URScript path):** the RG6 is
+driven over the UR **tool-flange RS485**. `ur_robot_driver` with
+`use_tool_communication:=true` bridges that to a host pseudo-serial device
+(`/tmp/ttyUR`) via **socat**; a Modbus-RTU client (`tests/onrobot_modbus_grip.py`)
+reads/writes the gripper registers. Requires on the cabinet: the **rs485 daemon
+URCap** (`/root/.urcaps/rs485-1.0.jar`, coexists with the OnRobot URCap), the
+**`ros` installation** (Tool I/O Controlled by User + Communication Interface +
+24 V + OnRobot device None), and **`external_control.urp` PLAYING** (the bridge
+runs inside the control program). Full detail: `../wiki/rg6_rs485_modbus.md`.
+
+> **Use the WSL-native scripts for hardware**, not the Docker container: the
+> gripper bridge needs `socat` + `use_tool_communication` + the cabinet rs485
+> URCap, which the container path below does NOT wire up. Run
+> `bash scripts/launch_real_rs485.sh` then `bash scripts/grip.sh {open|close}`
+> / `bash scripts/play_pickplace.sh --max 4 --real-gripper` from a normal
+> (non-admin) WSL terminal. See the README command cheat-sheet.
 
 ## Running the real-hardware driver in the container
 
@@ -121,16 +152,16 @@ Once mirrored networking is up and you can ping the robot from WSL:
 
 ```bash
 cd ~/ur_rg6_ws
-ROBOT_IP=192.168.1.102 docker compose -f docker/docker-compose.yml up ur_real
+ROBOT_IP=192.168.1.100 docker compose -f docker/docker-compose.yml up ur_real
 ```
 
-…or, in PowerShell, `.\docker\ur10e_rg6.ps1 real -RobotIp 192.168.1.102`.
+…or, in PowerShell, `.\docker\ur10e_rg6.ps1 real -RobotIp 192.168.1.100`.
 
 On the UR teach pendant, load and **Play** the External Control URCap
 program. Driver should print:
 
 ```
-[ur_robot_driver] connected to UR at 192.168.1.102
+[ur_robot_driver] connected to UR at 192.168.1.100
 [ur_robot_driver] received reverse interface handshake
 ```
 

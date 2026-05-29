@@ -3,7 +3,7 @@
 #   .\docker\ur10e_rg6.ps1 build
 #   .\docker\ur10e_rg6.ps1 rviz
 #   .\docker\ur10e_rg6.ps1 fake
-#   .\docker\ur10e_rg6.ps1 real -RobotIp 192.168.1.102
+#   .\docker\ur10e_rg6.ps1 real -RobotIp 192.168.1.100
 #   .\docker\ur10e_rg6.ps1 rosbridge
 #   .\docker\ur10e_rg6.ps1 shell
 #   .\docker\ur10e_rg6.ps1 down
@@ -14,7 +14,7 @@ param(
     [ValidateSet('build', 'rviz', 'fake', 'real', 'moveit', 'rosbridge', 'shell', 'down', 'rebuild')]
     [string]$Command,
 
-    [string]$RobotIp = '192.168.1.102',
+    [string]$RobotIp = '192.168.1.100',
     [string]$Distro  = 'Ubuntu-22.04',
     [string]$WsPath  = '~/ur_rg6_ws'
 )

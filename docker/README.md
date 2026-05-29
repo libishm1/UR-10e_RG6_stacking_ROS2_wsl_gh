@@ -40,8 +40,8 @@ docker build -f docker/Dockerfile.full \
 Then launch the full MoveIt 2 stack (fake hardware):
 ```bash
 docker compose -f docker/docker-compose.yml up full_stack
-# or against a real UR10e:
-USE_FAKE_HARDWARE=false ROBOT_IP=192.168.1.102 \
+# or against the real UR10e (cabinet at 192.168.1.100, laptop at 192.168.1.35):
+USE_FAKE_HARDWARE=false ROBOT_IP=192.168.1.100 \
     docker compose -f docker/docker-compose.yml up full_stack
 ```
 
@@ -49,6 +49,16 @@ Run the pick-and-place demo against the same container (separate shell):
 ```bash
 docker exec -it ur10e_rg6_full python3 /workspace/tests/play_pickplace.py
 ```
+
+> **Gripper note (RG6 over RS485/Modbus).** The container path drives the ARM
+> only. The RG6 is controlled over the UR tool-flange RS485 via the driver's
+> `use_tool_communication` bridge (socat → `/tmp/ttyUR`) + the cabinet rs485
+> daemon URCap + firewall port 54321 — which this Docker setup does NOT wire
+> up. For anything involving the real gripper (`--real-gripper`,
+> `scripts/grip.sh`), use the **WSL-native scripts** (`bash
+> scripts/launch_real_rs485.sh`, `bash scripts/grip.sh open|close`). See the
+> repo README command cheat-sheet and `../wiki/rg6_rs485_modbus.md`. (The old
+> URScript `rg_grip` gripper path is abandoned — see `../wiki/decisions.md`.)
 
 ### B. Dev image (workspace mounted from host)
 

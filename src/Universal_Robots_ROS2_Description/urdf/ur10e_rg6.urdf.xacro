@@ -123,6 +123,17 @@
     </collision>
   </link>
 
+  <!-- TODO (2026-05-29): the OnRobot QUICK CHANGER between the UR flange and
+       the bracket is NOT modelled — the bracket mounts straight onto tool0
+       here. Physically there's a Quick Changer block (~50 mm thick) in
+       between; its visual/collision volume is missing, so collision-aware
+       planning under-represents the tool stack near the wrist. Exact QC
+       dimensions TBD (user to measure). When adding it, INSERT a quick_changer
+       link here and PRESERVE the calibrated total tool0→rg6_tcp offset of
+       0.279 m (bracket 0 + body 0.051 + grasp 0.228) — e.g. give the QC its
+       Z height and subtract it from a downstream offset — or the kinematics
+       (verified to 0.4 mm vs the cabinet) will shift. Ref: OnRobot Single
+       Quick Changer; D:\\robot_ws TCP p[0,0,0.2786,...]. -->
   <joint name="rg6_mount_joint" type="fixed">
     <parent link="tool0"/>
     <child link="rg6_bracket"/>
